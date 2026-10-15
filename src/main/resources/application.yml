@@ -1,0 +1,89 @@
+spring:
+  application:
+    name: job-hunter-server
+
+  # Optional local-dev overrides (gitignored .env, see .env.example). Real
+  # environment variables still win over anything in this file.
+  config:
+    import: optional:file:./.env[.properties]
+
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/job_hunter}
+    username: ${DB_USERNAME:job_hunter}
+    password: ${DB_PASSWORD:job_hunter}
+
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+    properties:
+      hibernate:
+        jdbc:
+          time_zone: UTC
+
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+
+  servlet:
+    multipart:
+      max-file-size: ${CV_MAX_FILE_SIZE_BYTES:10485760}
+      max-request-size: ${CV_MAX_FILE_SIZE_BYTES:10485760}
+
+server:
+  port: ${SERVER_PORT:8080}
+  # Local-only by default; set SERVER_ADDRESS (e.g. 0.0.0.0) to expose it deliberately.
+  address: ${SERVER_ADDRESS:127.0.0.1}
+  servlet:
+    session:
+      timeout: ${SESSION_TIMEOUT:24h}
+
+app:
+  cors:
+    allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:5173}
+  auth:
+    # Token buckets: `capacity` attempts at once, refilled continuously at
+    # capacity per refill-period, so a limited client waits one interval
+    # (period / capacity), never a lockout. Counted in this JVM's memory
+    # (per instance; see InMemoryRateLimitStore). The client IP is the
+    # servlet remote address: behind a reverse proxy set
+    # server.forward-headers-strategy for the trusted proxy.
+    rate-limit:
+      login-per-ip:
+        capacity: 30
+        refill-period: 5m
+      login-per-email:
+        capacity: 10
+        refill-period: 15m
+      signup-per-ip:
+        capacity: 10
+        refill-period: 1h
+      password-change-per-user:
+        capacity: 5
+        refill-period: 15m
+  initial-user:
+    email: ${APP_INITIAL_USER_EMAIL:}
+    password: ${APP_INITIAL_USER_PASSWORD:}
+    full-name: ${APP_INITIAL_USER_FULL_NAME:Job Hunter}
+  encryption:
+    # Master secret used to derive the AES-GCM key that encrypts provider API
+    # keys at rest. Never stored in the database. See README "AI job
+    # matching" section.
+    master-secret: ${APP_ENCRYPTION_SECRET:}
+  cv:
+    storage-dir: ${CV_STORAGE_DIR:./data/cv-storage}
+    max-file-size-bytes: ${CV_MAX_FILE_SIZE_BYTES:10485760}
+  ai:
+    connect-timeout-ms: ${AI_CONNECT_TIMEOUT_MS:5000}
+    read-timeout-ms: ${AI_READ_TIMEOUT_MS:45000}
+    # Only a transient provider outage (502/503/504/529) is retried, at most
+    # max-retries times (1 => 2 requests total). 429 and every other failure
+    # are never retried. Test Connection never retries.
+    max-retries: ${AI_MAX_RETRIES:1}
+    retry-initial-backoff-ms: ${AI_RETRY_INITIAL_BACKOFF_MS:1000}
+    # A provider-supplied Retry-After longer than this is not waited out.
+    retry-max-wait-ms: ${AI_RETRY_MAX_WAIT_MS:5000}
+
+logging:
+  level:
+    dev.erezalkalay.jobhunter: INFO

@@ -1,0 +1,26 @@
+app:
+  # Every test request comes from 127.0.0.1 and the context is shared by all
+  # tests, so the limits are out of reach here; AuthRateLimitIntegrationTest
+  # runs with low limits in its own context.
+  auth:
+    rate-limit:
+      login-per-ip:
+        capacity: 1000000
+        refill-period: 1m
+      login-per-email:
+        capacity: 1000000
+        refill-period: 1m
+      signup-per-ip:
+        capacity: 1000000
+        refill-period: 1m
+      password-change-per-user:
+        capacity: 1000000
+        refill-period: 1m
+  initial-user:
+    email: test@jobhunter.local
+    password: test-password-123
+    full-name: Test User
+  encryption:
+    master-secret: test-only-master-secret-do-not-use-in-production
+  cv:
+    storage-dir: ${java.io.tmpdir}/job-hunter-test-cv-storage
