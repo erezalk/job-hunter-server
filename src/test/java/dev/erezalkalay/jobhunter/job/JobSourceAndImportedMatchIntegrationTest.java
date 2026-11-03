@@ -388,15 +388,18 @@ class JobSourceAndImportedMatchIntegrationTest extends IntegrationTestBase {
     }
 
     @Test
-    void aiRelevantJobEditInvalidatesTheImportedMatchLikeAnyOther() throws Exception {
-        long id = addWithFit("Stale Imported", FIT);
-        assertThat(match(id).statusCode()).isEqualTo(200);
+    void aiRelevantJobEditKeepsTheImportedMatchLikeAnyOther() throws Exception {
+        long id = addWithFit("Kept Imported", FIT);
+        HttpResponse<String> before = match(id);
+        assertThat(before.statusCode()).isEqualTo(200);
 
         HttpResponse<String> edited = browser.patchJson("/api/jobs/" + id,
-                editBody("Stale Imported", "\"External AI\"", "\"location\":\"Berlin\""));
+                editBody("Kept Imported", "\"External AI\"", "\"location\":\"Berlin\""));
 
         assertThat(edited.statusCode()).isEqualTo(200);
-        assertThat(match(id).statusCode()).isEqualTo(404);
+        HttpResponse<String> after = match(id);
+        assertThat(after.statusCode()).isEqualTo(200);
+        assertThat(after.body()).isEqualTo(before.body());
         assertThat(fakeAiProviderState.callCount()).isZero();
     }
 

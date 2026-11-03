@@ -10,7 +10,7 @@ This repository is the **backend**. The project consists of three repositories, 
 |---|---|
 | `job-hunter-server` (this one) | Java / Spring Boot REST API, PostgreSQL schema, AI provider integration |
 | `job-hunter-web` | React / TypeScript single-page UI |
-| `job-hunter-mcp` | Local stdio MCP server for Claude Desktop (`add_job` tool) |
+| `job-hunter-mcp` | Local stdio MCP server for Claude Desktop (`add_job` and read-only `get_companies` tools) |
 
 ```
 Browser ── job-hunter-web (Vite, :5173) ──┐  session cookie + CSRF
@@ -92,13 +92,13 @@ Settings → Data. **Export job data** downloads `job-hunter-export-YYYY-MM-DD.j
 
 ## Claude Desktop (MCP)
 
-In Settings → Claude / MCP, generate a personal integration token (shown once; only its hash is stored; one per user; revoke or replace at any time). Build and install the `job-hunter-mcp` extension in Claude Desktop and enter the backend URL (`http://localhost:8080`) and the token. Claude can then call `add_job`; jobs land in New on the token owner's Board, with source "External AI". If Claude passes its own fit evaluation, it is stored as an "External AI" match without calling Gemini/Claude through Job Hunter and without applying the Low Match rule; **Re-evaluate** later replaces it with the configured provider's result. Details: `job-hunter-mcp/README.md`.
+In Settings → Claude / MCP, generate a personal integration token (shown once; only its hash is stored; one per user; revoke or replace at any time). Build and install the `job-hunter-mcp` extension in Claude Desktop and enter the backend URL (`http://localhost:8080`) and the token. Claude can then call `add_job` and `get_companies` (read-only: the names of the companies already in the token owner's account, so Claude can skip them during job discovery); jobs land in New on the token owner's Board, with source "External AI". If Claude passes its own fit evaluation, it is stored as an "External AI" match without calling Gemini/Claude through Job Hunter and without applying the Low Match rule; **Re-evaluate** later replaces it with the configured provider's result. Details: `job-hunter-mcp/README.md`.
 
 ## Security
 
 - Browser: session cookie (`HttpOnly`) plus CSRF token (`XSRF-TOKEN` cookie / `X-XSRF-TOKEN` header); CORS limited to the configured frontend origin.
 - Accounts: passwords are hashed with BCrypt and never returned or logged. Policy: at least 8 characters, at most 72 bytes (BCrypt's limit), no composition rules. Emails are unique ignoring case. Changing the password ends the user's other sessions. Login, sign-up and password changes are rate limited (in memory, per instance — see PROJECT_STATUS.md).
-- MCP: a separate stateless filter chain for `/api/integrations/**` only, accepting a bearer token with the single permission to add jobs; tokens are random 256-bit values stored as SHA-256 digests.
+- MCP: a separate stateless filter chain for `/api/integrations/**` only, accepting a bearer token whose only permissions are adding a job and reading the owner's company names; tokens are random 256-bit values stored as SHA-256 digests.
 - Ownership: every job, company, Board ticket, stage, status-history entry, AI match, CV, setting and token belongs to exactly one user and is always resolved for the logged-in user (or the token's user); another user's ids answer 404, exactly like missing ones. Two users adding the same company + title get independent records. The database enforces it too (owner columns and composite foreign keys).
 - Errors use one JSON format, keep correct 4xx statuses and never include stack traces, SQL or provider responses.
 - CV files are stored under server-generated names and only the caller's active CV is ever served.
@@ -119,7 +119,7 @@ All endpoints except `POST /api/auth/login`, `POST /api/auth/register` and `GET 
 | Settings | `GET`/`PUT /api/settings`, `PUT`/`DELETE /api/settings/ai/api-key`, `DELETE /api/settings/ai`, `POST /api/settings/ai/test-connection` |
 | MCP token | `GET`/`POST`/`DELETE /api/settings/integrations/mcp-token` |
 | Job data | `GET /api/job-data/export`, `POST /api/job-data/import` |
-| Integration | `POST /api/integrations/jobs` (bearer token) |
+| Integration | `POST /api/integrations/jobs`, `GET /api/integrations/companies` (bearer token) |
 
 ## Tests
 

@@ -109,8 +109,9 @@ public class JobMatchService {
      * {@link JobMatch#PROVIDER_EXTERNAL_AI}. No AI provider is called and no
      * threshold/LOW_MATCH rule is applied: the score is informational, the
      * Application keeps its current status. The fingerprint is computed exactly
-     * like an internal evaluation's (with the owner's active CV), so editing the
-     * job's AI input or replacing the CV makes it stale the same way. An existing
+     * like an internal evaluation's (with the owner's active CV), so after an edit
+     * of the job's AI input or a CV replacement a non-forced evaluation re-runs it
+     * the same way (the stored match itself stays until then). An existing
      * match is never overwritten (returns empty). Joins the caller's transaction
      * so job, application and match commit together.
      */

@@ -7,7 +7,6 @@ import dev.erezalkalay.jobhunter.common.exception.ResourceNotFoundException;
 import dev.erezalkalay.jobhunter.company.Company;
 import dev.erezalkalay.jobhunter.company.CompanyRepository;
 import dev.erezalkalay.jobhunter.job.dto.JobRequest;
-import dev.erezalkalay.jobhunter.jobmatch.JobMatchRepository;
 import dev.erezalkalay.jobhunter.user.User;
 import java.util.Locale;
 import java.util.Objects;
@@ -28,18 +27,15 @@ public class JobService {
 
     private final JobRepository jobRepository;
     private final CompanyRepository companyRepository;
-    private final JobMatchRepository jobMatchRepository;
     private final CurrentUserProvider currentUserProvider;
 
     public JobService(
             JobRepository jobRepository,
             CompanyRepository companyRepository,
-            JobMatchRepository jobMatchRepository,
             CurrentUserProvider currentUserProvider
     ) {
         this.jobRepository = jobRepository;
         this.companyRepository = companyRepository;
-        this.jobMatchRepository = jobMatchRepository;
         this.currentUserProvider = currentUserProvider;
     }
 
@@ -54,11 +50,10 @@ public class JobService {
      * are never touched. A company no longer used by any of the user's jobs is
      * removed.
      *
-     * If the edit changes the input the AI evaluates (title, company,
-     * location, work model, description) the job's now-stale JobMatch is
-     * removed — no AI call is made; the user re-evaluates explicitly.
-     * Other edits (URL, salary, source) keep the existing match. Status, including
-     * LOW_MATCH, is never changed here.
+     * The job's JobMatch is never touched here, whatever field changed (even
+     * title, company, location, work model or description): the stored AI
+     * result stays exactly as it was until the user explicitly re-evaluates.
+     * No AI call is made. Status, including LOW_MATCH, is never changed here.
      */
     @Transactional
     public Job updateJobForCurrentUser(Long jobId, JobRequest request) {
@@ -76,7 +71,6 @@ public class JobService {
                     });
         }
 
-        String aiInputBefore = aiInput(job);
         Company previousCompany = job.getCompany();
 
         job.setTitle(collapseWhitespace(request.title()));
@@ -92,7 +86,6 @@ public class JobService {
         job.setSalaryMin(request.salaryMin());
         job.setSalaryMax(request.salaryMax());
         job.setCurrency(blankToNull(request.currency()));
-        // Metadata only: not part of aiInput(), so editing it never invalidates the match.
         job.setSource(blankToNull(request.source()));
         if (StringUtils.hasText(request.description())) {
             job.setDescription(request.description());
@@ -102,16 +95,17 @@ public class JobService {
         }
 
         Job saved = jobRepository.saveAndFlush(job);
-        if (!aiInputBefore.equals(aiInput(saved))) {
-            jobMatchRepository.deleteByJobIdAndUserId(saved.getId(), owner.getId());
-        }
         if (previousCompany != null && previousCompany != saved.getCompany()) {
             companyRepository.deleteIfUnreferenced(previousCompany.getId(), owner.getId());
         }
         return saved;
     }
 
-    /** The job fields that make up the AI evaluation input (AiMatchRequest); also fingerprinted. */
+    /**
+     * The job fields that make up the AI evaluation input (AiMatchRequest);
+     * part of the JobMatch fingerprint, which only decides whether a
+     * non-forced evaluation may reuse the stored match.
+     */
     public static String aiInput(Job job) {
         return String.join("\u0000",
                 Objects.toString(job.getTitle(), ""),

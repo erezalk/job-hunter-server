@@ -173,19 +173,23 @@ class JobEditIntegrationTest extends IntegrationTestBase {
     }
 
     @Test
-    void aiRelevantEditInvalidatesTheMatchWithoutCallingTheProvider() throws Exception {
-        Tracked job = track("Stale Role", DESCRIPTION);
+    void aiRelevantEditKeepsTheMatchWithoutCallingTheProvider() throws Exception {
+        Tracked job = track("Kept Role", DESCRIPTION);
         prepareAi();
-        fakeAiProviderState.setNextResult(new AiMatchResult(85, List.of("Java"), List.of(), List.of()));
+        fakeAiProviderState.setNextResult(new AiMatchResult(85, List.of("Java"), List.of("Go"), List.of("Commute")));
         assertThat(client.postJson("/api/jobs/" + job.jobId() + "/match/evaluate", "{}").statusCode()).isEqualTo(200);
         assertThat(fakeAiProviderState.callCount()).isEqualTo(1);
+        String matchBefore = client.get("/api/jobs/" + job.jobId() + "/match").body();
 
         assertThat(client.patchJson("/api/jobs/" + job.jobId(),
-                body("Stale Role", company, null, "A completely different description")).statusCode()).isEqualTo(200);
+                body("Kept Role Renamed", company + " New", null, "A completely different description")).statusCode())
+                .isEqualTo(200);
 
         assertThat(fakeAiProviderState.callCount()).isEqualTo(1);
-        assertThat(client.get("/api/jobs/" + job.jobId() + "/match").statusCode()).isEqualTo(404);
-        assertThat(fitScoreOnBoard(job)).isNull();
+        HttpResponse<String> matchAfter = client.get("/api/jobs/" + job.jobId() + "/match");
+        assertThat(matchAfter.statusCode()).isEqualTo(200);
+        assertThat(matchAfter.body()).isEqualTo(matchBefore);
+        assertThat(((Number) fitScoreOnBoard(job)).intValue()).isEqualTo(85);
         assertThat(JsonPath.<String>read(client.get("/api/applications/" + job.applicationId()).body(),
                 "$.status.code")).isEqualTo("NEW");
     }
@@ -233,12 +237,16 @@ class JobEditIntegrationTest extends IntegrationTestBase {
         assertThat((Boolean) JsonPath.read(edit.body(), "$.descriptionDiscarded")).isFalse();
         assertThat(JsonPath.<String>read(edit.body(), "$.description")).isEqualTo("A fresh, complete description");
         assertThat(status(job)).isEqualTo("LOW_MATCH");
-        assertThat(client.get("/api/jobs/" + job.jobId() + "/match").statusCode()).isEqualTo(404);
+        // The low score stays visible until the user re-evaluates.
+        HttpResponse<String> kept = client.get("/api/jobs/" + job.jobId() + "/match");
+        assertThat(kept.statusCode()).isEqualTo(200);
+        assertThat(JsonPath.<Integer>read(kept.body(), "$.fitScore")).isEqualTo(30);
         assertThat(fakeAiProviderState.callCount()).isEqualTo(1);
 
         // Only an explicit evaluation can move it, via the normal threshold rule.
         fakeAiProviderState.setNextResult(new AiMatchResult(90, List.of("Java"), List.of(), List.of()));
-        assertThat(client.postJson("/api/jobs/" + job.jobId() + "/match/evaluate", "{}").statusCode()).isEqualTo(200);
+        assertThat(client.postJson("/api/jobs/" + job.jobId() + "/match/evaluate?force=true", "{}").statusCode())
+                .isEqualTo(200);
         assertThat(status(job)).isEqualTo("NEW");
     }
 
