@@ -115,7 +115,7 @@ public class JobDataExportService {
                         history.stream().map(entry -> new ExportedStatusChange(
                                 entry.getStatus().getCode(), entry.getEnteredAt(), entry.getNotes())).toList(),
                         stages.stream().map(stage -> new ExportedStage(
-                                stage.getName(), stage.getScheduledAt(), stage.getInterviewerNames(), stage.getNotes(),
+                                stage.getName(), stage.getScheduledAt(), stage.getScheduledEndAt(), stage.getInterviewerNames(), stage.getNotes(),
                                 stage.getOutcome(), stage.getCreatedAt(), stage.getUpdatedAt())).toList()),
                 match == null ? null : new ExportedAiMatch(
                         match.getMatchScore(),

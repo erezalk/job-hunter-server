@@ -4,6 +4,7 @@ import dev.erezalkalay.jobhunter.application.dto.ApplicationStageRequest;
 import dev.erezalkalay.jobhunter.application.dto.MoveRequest;
 import dev.erezalkalay.jobhunter.application.dto.UpcomingStageResponse;
 import dev.erezalkalay.jobhunter.auth.CurrentUserProvider;
+import dev.erezalkalay.jobhunter.common.exception.FieldValidationException;
 import dev.erezalkalay.jobhunter.common.exception.IllegalStatusTransitionException;
 import dev.erezalkalay.jobhunter.common.exception.InvalidRequestException;
 import dev.erezalkalay.jobhunter.common.exception.ResourceNotFoundException;
@@ -272,16 +273,22 @@ public class ApplicationService {
     @Transactional
     public ApplicationStage addStage(Long applicationId, ApplicationStageRequest request) {
         Application application = getApplication(applicationId);
+        Instant end = request.scheduledEndAt() == null ? null : request.scheduledEndAt().orElse(null);
+        validateStageTimes(request.scheduledAt(), end, false);
         ApplicationStage stage = new ApplicationStage(application, request.name());
-        applyStageFields(stage, request);
+        applyStageFields(stage, request, end);
         return applicationStageRepository.save(stage);
     }
 
     @Transactional
     public ApplicationStage updateStage(Long applicationId, Long stageId, ApplicationStageRequest request) {
         ApplicationStage stage = getStageOwnedByApplication(applicationId, stageId);
+        // An omitted scheduledEndAt keeps the stored end; an explicit null clears it.
+        boolean endOmitted = request.scheduledEndAt() == null;
+        Instant end = endOmitted ? stage.getScheduledEndAt() : request.scheduledEndAt().orElse(null);
+        validateStageTimes(request.scheduledAt(), end, endOmitted);
         stage.setName(request.name());
-        applyStageFields(stage, request);
+        applyStageFields(stage, request, end);
         return stage;
     }
 
@@ -291,11 +298,31 @@ public class ApplicationService {
         applicationStageRepository.delete(stage);
     }
 
-    private void applyStageFields(ApplicationStage stage, ApplicationStageRequest request) {
+    private void applyStageFields(ApplicationStage stage, ApplicationStageRequest request, Instant end) {
         stage.setScheduledAt(request.scheduledAt());
+        stage.setScheduledEndAt(end);
         stage.setInterviewerNames(request.interviewerNames());
         stage.setNotes(request.notes());
         stage.setOutcome(request.outcome());
+    }
+
+    // The optional end must come with a start and be strictly after it. Checked on the
+    // effective values being saved, so changing only the start of a stage that has an end
+    // is validated against that end too (the end is never silently changed or dropped).
+    private static void validateStageTimes(Instant start, Instant end, boolean endKept) {
+        if (end == null) {
+            return;
+        }
+        if (start == null) {
+            if (endKept) {
+                throw new FieldValidationException("scheduledAt",
+                        "is required while the stage has an end time (send scheduledEndAt: null to remove the end)");
+            }
+            throw new FieldValidationException("scheduledEndAt", "must not be set without a start time");
+        }
+        if (!end.isAfter(start)) {
+            throw new FieldValidationException("scheduledEndAt", "must be after the start time");
+        }
     }
 
     // A stage id only resolves inside the given application of the current user.

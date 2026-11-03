@@ -31,7 +31,7 @@ public interface ApplicationStageRepository extends Repository<ApplicationStage,
     // own applications, whatever the application's status. Ties on the
     // timestamp fall back to the stage id so the order is deterministic.
     @Query("SELECT new dev.erezalkalay.jobhunter.application.dto.UpcomingStageResponse("
-            + "s.id, s.name, s.scheduledAt, a.id, j.id, j.title, c.name) "
+            + "s.id, s.name, s.scheduledAt, s.scheduledEndAt, a.id, j.id, j.title, c.name) "
             + "FROM ApplicationStage s JOIN s.application a JOIN a.job j LEFT JOIN j.company c "
             + "WHERE a.user.id = :userId AND s.scheduledAt > :now "
             + "ORDER BY s.scheduledAt ASC, s.id ASC")

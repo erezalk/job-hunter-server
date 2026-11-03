@@ -54,11 +54,30 @@ class UpcomingStagesIntegrationTest extends IntegrationTestBase {
         assertThat(mine).extracting(r -> r.get("stageName")).containsExactly("UpA soon", "UpA later");
         Map<String, Object> first = mine.get(0);
         assertThat(first.keySet()).containsExactlyInAnyOrder(
-                "stageId", "stageName", "scheduledAt", "applicationId", "jobId", "jobTitle", "companyName");
+                "stageId", "stageName", "scheduledAt", "scheduledEndAt", "applicationId", "jobId", "jobTitle", "companyName");
         assertThat(first.get("jobTitle")).isEqualTo("UpA Engineer");
         assertThat(first.get("companyName")).isEqualTo("UpA Corp");
         assertThat(first.get("applicationId")).isEqualTo(app);
         assertThat(Instant.parse((String) first.get("scheduledAt"))).isAfter(now);
+    }
+
+    @Test
+    void carriesTheOptionalEndTimeWithoutChangingWhichStagesQualify() throws Exception {
+        int app = addJob("UpG Corp", "UpG Engineer");
+        Instant start = Instant.now().plus(2, ChronoUnit.DAYS).truncatedTo(ChronoUnit.SECONDS);
+        Instant end = start.plus(1, ChronoUnit.HOURS);
+        client.postJson("/api/applications/" + app + "/stages",
+                "{\"name\":\"UpG with end\",\"scheduledAt\":\"" + start + "\",\"scheduledEndAt\":\"" + end + "\"}");
+        addStage(app, "UpG without end", start.plus(1, ChronoUnit.DAYS));
+        // Qualification depends on the start only: a stage that started but has not ended is not upcoming.
+        client.postJson("/api/applications/" + app + "/stages", "{\"name\":\"UpG running\",\"scheduledAt\":\""
+                + Instant.now().minus(1, ChronoUnit.HOURS) + "\",\"scheduledEndAt\":\"" + Instant.now().plus(1, ChronoUnit.HOURS) + "\"}");
+
+        List<Map<String, Object>> mine = upcomingFor(app);
+
+        assertThat(mine).extracting(r -> r.get("stageName")).containsExactly("UpG with end", "UpG without end");
+        assertThat(mine.get(0).get("scheduledEndAt")).isEqualTo(end.toString());
+        assertThat(mine.get(1).get("scheduledEndAt")).isNull();
     }
 
     @Test

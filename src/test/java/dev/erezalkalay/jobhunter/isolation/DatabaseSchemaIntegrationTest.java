@@ -1,6 +1,7 @@
 package dev.erezalkalay.jobhunter.isolation;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import dev.erezalkalay.jobhunter.IntegrationTestBase;
 import java.sql.Connection;
@@ -31,7 +32,7 @@ class DatabaseSchemaIntegrationTest extends IntegrationTestBase {
         assertThat(flyway(url).migrate().success).isTrue();
 
         assertThat(query(url, "SELECT version || ' ' || description || ' ' || success FROM flyway_schema_history ORDER BY installed_rank"))
-                .containsExactly("1 initial schema true");
+                .containsExactly("1 initial schema true", "2 add stage scheduled end at true");
         assertThat(schema(url)).isEqualTo(schema(POSTGRES.getJdbcUrl()));
         assertThat(String.join("\n", schema(url))).contains("jobs.user_id bigint NO", "uq_jobs_user_company_title",
                 "FOREIGN KEY (job_id, user_id) REFERENCES jobs(id, user_id) ON DELETE CASCADE",
@@ -39,6 +40,36 @@ class DatabaseSchemaIntegrationTest extends IntegrationTestBase {
                 "uq_users_email_ignore_case");
         assertThat(query(url, "SELECT code FROM application_statuses ORDER BY sort_order"))
                 .containsExactly("NEW", "CV_SENT", "INTERVIEW_PROCESS", "OFFER", "REJECTED", "ARCHIVED", "LOW_MATCH");
+    }
+
+    @Test
+    void theStageEndMigrationIsAdditiveAndLeavesExistingStagesUntouched() throws Exception {
+        String url = createDatabase("schema_stage_end");
+        assertThat(flyway(url, "1").migrate().success).isTrue();
+        exec(url,
+                "INSERT INTO users (email, password_hash, full_name) VALUES ('old@example.com', 'x', 'Old')",
+                "INSERT INTO jobs (user_id, title, company_key, title_key) SELECT id, 'Role', '', 'role' FROM users",
+                "INSERT INTO applications (job_id, user_id, status_code) SELECT j.id, j.user_id, 'NEW' FROM jobs j",
+                "INSERT INTO application_stages (application_id, name, scheduled_at, interviewer_names, notes, outcome) "
+                        + "SELECT id, 'Phone screen', '2026-10-29 13:00:00+00', 'Dana', 'Asked about Spring', 'Passed' FROM applications",
+                "INSERT INTO application_stages (application_id, name) SELECT id, 'Unscheduled' FROM applications");
+        String before = "SELECT name || '|' || coalesce(scheduled_at::text, '-') || '|' || coalesce(interviewer_names, '-') || '|' "
+                + "|| coalesce(notes, '-') || '|' || coalesce(outcome, '-') || '|' || created_at || '|' || updated_at "
+                + "FROM application_stages ORDER BY id";
+        List<String> rowsBefore = query(url, before);
+
+        assertThat(flyway(url).migrate().success).isTrue();
+
+        assertThat(query(url, before)).isEqualTo(rowsBefore);
+        assertThat(query(url, "SELECT count(*) FROM application_stages WHERE scheduled_end_at IS NULL")).containsExactly("2");
+        assertThat(query(url, "SELECT data_type || ' ' || is_nullable FROM information_schema.columns "
+                + "WHERE table_name = 'application_stages' AND column_name = 'scheduled_end_at'"))
+                .containsExactly("timestamp with time zone YES");
+        // The database refuses an end that is not strictly after a start.
+        assertThatThrownBy(() -> exec(url, "UPDATE application_stages SET scheduled_end_at = scheduled_at WHERE scheduled_at IS NOT NULL"))
+                .hasMessageContaining("ck_application_stages_end_after_start");
+        assertThatThrownBy(() -> exec(url, "UPDATE application_stages SET scheduled_end_at = now() WHERE scheduled_at IS NULL"))
+                .hasMessageContaining("ck_application_stages_end_after_start");
     }
 
     @Test
@@ -77,9 +108,14 @@ class DatabaseSchemaIntegrationTest extends IntegrationTestBase {
     }
 
     private static Flyway flyway(String url) {
+        return flyway(url, "latest");
+    }
+
+    private static Flyway flyway(String url, String target) {
         return Flyway.configure()
                 .dataSource(url, POSTGRES.getUsername(), POSTGRES.getPassword())
                 .locations("classpath:db/migration")
+                .target(target)
                 .load();
     }
 

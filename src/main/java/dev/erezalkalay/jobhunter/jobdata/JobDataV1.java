@@ -94,6 +94,7 @@ public record JobDataV1(
     public record ExportedStage(
             @NotBlank @Size(max = 255) String name,
             Instant scheduledAt,
+            Instant scheduledEndAt,
             @Size(max = 500) String interviewerNames,
             @Size(max = NOTES) String notes,
             @Size(max = 255) String outcome,

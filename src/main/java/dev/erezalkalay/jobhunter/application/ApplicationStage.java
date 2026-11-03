@@ -40,6 +40,10 @@ public class ApplicationStage {
     @Column(name = "scheduled_at")
     private Instant scheduledAt;
 
+    // Optional; when set it is strictly after scheduledAt (checked by the service and the database).
+    @Column(name = "scheduled_end_at")
+    private Instant scheduledEndAt;
+
     @Column(name = "interviewer_names")
     private String interviewerNames;
 
@@ -85,6 +89,14 @@ public class ApplicationStage {
 
     public void setScheduledAt(Instant scheduledAt) {
         this.scheduledAt = scheduledAt;
+    }
+
+    public Instant getScheduledEndAt() {
+        return scheduledEndAt;
+    }
+
+    public void setScheduledEndAt(Instant scheduledEndAt) {
+        this.scheduledEndAt = scheduledEndAt;
     }
 
     public String getInterviewerNames() {

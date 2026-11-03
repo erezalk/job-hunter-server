@@ -147,7 +147,7 @@ class JobDataExportImportIntegrationTest extends IntegrationTestBase {
         classified.put("applications", Set.of("status_code", "board_position", "starred", "notes", "applied_at",
                 "created_at", "updated_at", "id", "job_id", "user_id"));
         classified.put("application_status_history", Set.of("status_code", "entered_at", "notes", "id", "application_id"));
-        classified.put("application_stages", Set.of("name", "scheduled_at", "interviewer_names", "notes", "outcome",
+        classified.put("application_stages", Set.of("name", "scheduled_at", "scheduled_end_at", "interviewer_names", "notes", "outcome",
                 "created_at", "updated_at", "id", "application_id"));
         classified.put("job_matches", Set.of("match_score", "matching_skills", "missing_skills", "concerns", "provider",
                 "model", "evaluated_at", "created_at", "id", "job_id", "user_id", "cv_id", "fingerprint"));
@@ -306,6 +306,27 @@ class JobDataExportImportIntegrationTest extends IntegrationTestBase {
         ObjectNode stringFlag = job("a", "String Flag " + run);
         stringFlag.put("descriptionDiscarded", "false");
         assertRejected(client.postJson(IMPORT, validFile(stringFlag)), 400);
+        assertNothingImported();
+    }
+
+    @Test
+    void aStageEndThatIsNotAfterItsStartIsRejectedAndNothingIsImported() throws Exception {
+        for (String[] times : new String[][] {
+                {"2025-02-20T13:30:00Z", "2025-02-20T13:30:00Z"},
+                {"2025-02-20T13:30:00Z", "2025-02-20T12:00:00Z"},
+                {null, "2025-02-20T12:00:00Z"}}) {
+            ObjectNode bad = job("a", "End Role " + run + times[1]);
+            ObjectNode stage = ((ArrayNode) bad.get("application").get("stages")).addObject().put("name", "Interview")
+                    .put("createdAt", "2025-02-11T08:00:00Z").put("updatedAt", "2025-02-21T08:00:00Z")
+                    .put("scheduledEndAt", times[1]);
+            if (times[0] != null) {
+                stage.put("scheduledAt", times[0]);
+            }
+            HttpResponse<String> response = client.postJson(IMPORT, validFile(bad));
+            assertRejected(response, 400);
+            assertThat(JsonPath.<List<String>>read(response.body(), "$.fieldErrors[*].field"))
+                    .containsExactly("jobs[0].application.stages[0].scheduledEndAt");
+        }
         assertNothingImported();
     }
 
@@ -480,7 +501,7 @@ class JobDataExportImportIntegrationTest extends IntegrationTestBase {
         client.patchJson("/api/applications/" + backendApp + "/starred", "{\"starred\":true}");
         client.patchJson("/api/applications/" + backendApp + "/notes", "{\"notes\":\"Salary discussion: flexible.\\nRecruiter: Noa\"}");
         client.postJson("/api/applications/" + backendApp + "/stages", "{\"name\":\"Recruiter Call\",\"scheduledAt\":\"2025-04-01T09:00:00Z\","
-                + "\"interviewerNames\":\"Noa\",\"notes\":\"Intro\",\"outcome\":\"Passed\"}");
+                + "\"scheduledEndAt\":\"2025-04-01T09:45:00Z\",\"interviewerNames\":\"Noa\",\"notes\":\"Intro\",\"outcome\":\"Passed\"}");
         client.postJson("/api/applications/" + backendApp + "/stages", "{\"name\":\"System Design\",\"interviewerNames\":\"Dana, Lee\"}");
         fakeAi.setNextResult(new AiMatchResult(85, List.of("Java", "Spring Boot"), List.of("Go"), List.of("Hybrid 3 days")));
         assertThat(client.postJson("/api/jobs/" + backend + "/match/evaluate", "{}").statusCode()).isEqualTo(200);
@@ -553,6 +574,8 @@ class JobDataExportImportIntegrationTest extends IntegrationTestBase {
         assertThat(JsonPath.<List<String>>read(export, backend + ".application.statusHistory[*].notes")).contains("sent tailored CV");
         assertThat(JsonPath.<List<String>>read(export, backend + ".application.stages[*].name")).containsExactly("Recruiter Call", "System Design");
         assertThat(JsonPath.<List<String>>read(export, backend + ".application.stages[*].scheduledAt")).contains("2025-04-01T09:00:00Z");
+        assertThat(JsonPath.<List<String>>read(export, backend + ".application.stages[0].scheduledEndAt")).containsExactly("2025-04-01T09:45:00Z");
+        assertThat(JsonPath.<List<String>>read(export, backend + ".application.stages[1].scheduledEndAt")).containsExactly((String) null);
         assertThat(JsonPath.<List<String>>read(export, backend + ".application.stages[*].interviewerNames")).containsExactly("Noa", "Dana, Lee");
         assertThat(JsonPath.<List<String>>read(export, backend + ".application.stages[*].outcome")).contains("Passed");
         assertThat(JsonPath.<List<Number>>read(export, backend + ".aiMatch.fitScore").get(0).doubleValue()).isEqualTo(85.0);

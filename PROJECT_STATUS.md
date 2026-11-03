@@ -84,7 +84,7 @@ users ─┬─< companies ─────────────┐ (company_i
 - **Application** — the Board "ticket" of a job, exactly one per job: status, notes, starred flag, Board position, `appliedAt` (set the first time it enters `CV_SENT`).
 - **ApplicationStatus** — lookup table, not an enum: `NEW`, `CV_SENT`, `INTERVIEW_PROCESS` (label "Interview"), `OFFER`, `REJECTED`, `ARCHIVED`, `LOW_MATCH`. Any transition is allowed; `is_terminal` is informational only.
 - **ApplicationStatusHistory** — one row per status change (automatic changes have notes starting with "Automatic:").
-- **ApplicationStage** — manually entered recruitment events (name, optional `scheduledAt`, interviewers, notes, outcome). Listed scheduled-first by date, then by creation.
+- **ApplicationStage** — manually entered recruitment events (name, optional `scheduledAt` and optional `scheduledEndAt` — when set it must be strictly after the start and needs one: the API answers 400 with a `scheduledEndAt` field error, the database has a matching CHECK, import validates it too. On `PATCH`, `scheduledEndAt` is three-state: omitted keeps the stored end, `null` clears it, a value sets it (the other stage fields stay full-replace); interviewers, notes, outcome). Listed scheduled-first by date, then by creation.
 - **Cv** — one row per upload; exactly one primary ("active") per user.
 - **JobMatch** — the owner's AI evaluation of a job, at most one per job.
 - **Settings** — per user: theme, timezone, visible Board columns, minimum fit score, AI provider/model, encrypted provider keys.

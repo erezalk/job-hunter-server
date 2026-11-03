@@ -192,6 +192,15 @@ public class JobDataImportService {
                 }
             }
         }
+        List<ExportedStage> stages = application == null ? null : application.stages();
+        for (int s = 0; stages != null && s < stages.size(); s++) {
+            ExportedStage stage = stages.get(s);
+            if (stage != null && stage.scheduledEndAt() != null
+                    && (stage.scheduledAt() == null || !stage.scheduledEndAt().isAfter(stage.scheduledAt()))) {
+                errors.putIfAbsent(at + ".application.stages[" + s + "].scheduledEndAt",
+                        "must be after scheduledAt (which is then required)");
+            }
+        }
         ExportedAiMatch match = job.aiMatch();
         if (match != null && match.provider() != null && !PROVIDERS.contains(match.provider())) {
             errors.putIfAbsent(at + ".aiMatch.provider", "must be one of " + PROVIDERS.stream().sorted().toList());
@@ -261,6 +270,7 @@ public class JobDataImportService {
             for (ExportedStage exportedStage : exportedApplication.stages()) {
                 ApplicationStage stage = new ApplicationStage(application, exportedStage.name());
                 stage.setScheduledAt(exportedStage.scheduledAt());
+                stage.setScheduledEndAt(exportedStage.scheduledEndAt());
                 stage.setInterviewerNames(exportedStage.interviewerNames());
                 stage.setNotes(exportedStage.notes());
                 stage.setOutcome(exportedStage.outcome());
