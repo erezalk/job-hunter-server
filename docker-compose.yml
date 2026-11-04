@@ -1,15 +1,19 @@
+# Job Hunter, full stack: PostgreSQL + backend (this repo) + web UI (../job-hunter-web).
+#
+#   docker compose up --build        then open http://localhost:3000
+#
+# Requires the three repositories cloned side by side (job-hunter-server, job-hunter-web, job-hunter-mcp).
+# Optional settings are read from a .env file next to this file (see .env.example).
+
 services:
   postgres:
     image: postgres:17-alpine
-    container_name: job-hunter-postgres
     restart: unless-stopped
     environment:
       POSTGRES_DB: job_hunter
       POSTGRES_USER: job_hunter
-      POSTGRES_PASSWORD: job_hunter
-    ports:
-      # Published on localhost only, not on every network interface.
-      - "127.0.0.1:5432:5432"
+      # Only used when the data volume is first created. The database is not published to the host.
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-job_hunter}
     volumes:
       - job-hunter-postgres-data:/var/lib/postgresql/data
     healthcheck:
@@ -18,5 +22,59 @@ services:
       timeout: 5s
       retries: 10
 
+  backend:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DB_URL: jdbc:postgresql://postgres:5432/job_hunter
+      DB_USERNAME: job_hunter
+      DB_PASSWORD: ${DB_PASSWORD:-job_hunter}
+      # The browser reaches the API through the web container (same origin); this only matters if
+      # you call the API directly from another origin.
+      CORS_ALLOWED_ORIGINS: http://localhost:${WEB_HOST_PORT:-3000},http://127.0.0.1:${WEB_HOST_PORT:-3000}
+      # Passed through from .env / your shell only when set; otherwise the application defaults apply.
+      APP_ENCRYPTION_SECRET:
+      APP_INITIAL_USER_EMAIL:
+      APP_INITIAL_USER_PASSWORD:
+      APP_INITIAL_USER_FULL_NAME:
+      SESSION_TIMEOUT:
+      CV_MAX_FILE_SIZE_BYTES:
+    ports:
+      # Loopback only: used by the Job Hunter MCP extension (Claude Desktop) on this machine.
+      - "127.0.0.1:${API_HOST_PORT:-8080}:8080"
+    volumes:
+      - job-hunter-cv-storage:/data/cv-storage
+    healthcheck:
+      # The runtime image has no curl: a plain HTTP request over bash's /dev/tcp, expecting 200.
+      test:
+        - CMD
+        - bash
+        - -c
+        - "exec 3<>/dev/tcp/127.0.0.1/8080 && printf 'GET /api/auth/csrf HTTP/1.0\\r\\nHost: localhost\\r\\n\\r\\n' >&3 && head -n 1 <&3 | grep -q ' 200'"
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 60s
+
+  web:
+    build: ../job-hunter-web
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      # Loopback only: open this in your browser.
+      - "127.0.0.1:${WEB_HOST_PORT:-3000}:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:8080/"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+
 volumes:
+  # `docker compose down` keeps both; `docker compose down -v` DELETES them.
   job-hunter-postgres-data:
+  job-hunter-cv-storage:

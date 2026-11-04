@@ -1,0 +1,28 @@
+# Keep the build context small and free of local secrets and data.
+.git
+.gitignore
+.gitattributes
+.idea
+.vscode
+*.iml
+.DS_Store
+
+# Build output
+target
+
+# Local runtime data and secrets (CV PDFs, .env)
+data
+.env
+.env.*
+*.log
+logs
+
+# Not needed to build the image
+*.md
+Dockerfile
+.dockerignore
+docker-compose*.yml
+*.pem
+*.key
+*.p12
+*.jks

@@ -1,0 +1,11 @@
+# For contributors who run the backend and frontend outside Docker (./mvnw spring-boot:run, npm run dev):
+# publishes PostgreSQL on 127.0.0.1:5432 and is meant to be used with only the database service.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d postgres
+#
+# Not needed for the normal `docker compose up --build`.
+
+services:
+  postgres:
+    ports:
+      - "127.0.0.1:5432:5432"

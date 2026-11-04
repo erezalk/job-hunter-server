@@ -13,10 +13,116 @@ This repository is the **backend**. The project consists of three repositories, 
 | `job-hunter-mcp` | Local stdio MCP server for Claude Desktop (`add_job` and read-only `get_companies` tools) |
 
 ```
-Browser ── job-hunter-web (Vite, :5173) ──┐  session cookie + CSRF
-                                           ├──► job-hunter-server (:8080) ──► PostgreSQL (:5432)
-Claude Desktop ── job-hunter-mcp (stdio) ──┘  bearer token                └──► Anthropic / Gemini APIs
+Docker (docker compose up --build)
+ Browser ──► web (nginx, :3000) ──/api/──► backend (Spring Boot, :8080) ──► postgres (internal only)
+              static React UI  session cookie + CSRF, same origin          └──► Anthropic / Gemini APIs
+
+Claude Desktop ── job-hunter-mcp (stdio, on the host) ── bearer token ──► http://localhost:8080 (backend)
 ```
+
+## Quick Start with Docker
+
+This is the recommended way to run Job Hunter. You need **only Git and [Docker Desktop](https://www.docker.com/products/docker-desktop/)** (running). You do **not** need Java, Maven, Node.js, npm or PostgreSQL: they exist only inside the Docker images.
+
+**1. Clone the three repositories into the same parent folder** (any folder; only the sibling layout matters):
+
+```bash
+git clone https://github.com/erezalk/job-hunter-server.git
+git clone https://github.com/erezalk/job-hunter-web.git
+git clone https://github.com/erezalk/job-hunter-mcp.git
+```
+
+```
+some-folder/
+├── job-hunter-server/   <- you run Docker from here
+├── job-hunter-web/      <- built by the compose file via ../job-hunter-web
+└── job-hunter-mcp/      <- only for the optional Claude Desktop integration
+```
+
+**2. Configure (optional but recommended)**
+
+```bash
+cd job-hunter-server
+cp .env.example .env
+```
+
+Nothing in `.env` is required to start Job Hunter as a job tracker. If you want the AI fit evaluation (your own Anthropic/Gemini API key), set `APP_ENCRYPTION_SECRET` in `.env` first. It encrypts the saved API keys, so use a long random value and keep it stable:
+
+```bash
+openssl rand -base64 48     # macOS / Linux; paste the output after APP_ENCRYPTION_SECRET=
+```
+
+On Windows PowerShell: `[Convert]::ToBase64String((1..48 | ForEach-Object { Get-Random -Maximum 256 }))`. Never commit `.env`.
+
+**3. Start**
+
+```bash
+docker compose up --build
+```
+
+The first build downloads dependencies and takes a few minutes; later starts take seconds. When the log shows the backend is up, open **http://localhost:3000** and create your account with **Sign up**.
+
+| What | Address (this machine only) |
+|---|---|
+| Job Hunter in your browser | http://localhost:3000 |
+| Backend API (used by the Claude Desktop extension) | http://localhost:8080 |
+| PostgreSQL | not published; reachable only by the backend inside Docker |
+
+Both ports are bound to `127.0.0.1`, so they are not reachable from other computers. If a port is taken (for example by a manually started dev server), set `WEB_HOST_PORT` and/or `API_HOST_PORT` in `.env`; if you change `API_HOST_PORT`, use that port in the Claude extension too.
+
+**Everyday commands** (run in `job-hunter-server`)
+
+| Task | Command |
+|---|---|
+| Run in the background | `docker compose up -d --build` |
+| Stop (keeps all data) | `docker compose down` |
+| Start again | `docker compose up -d` |
+| Show logs | `docker compose logs -f` (or `docker compose logs -f backend`) |
+| Status / health | `docker compose ps` |
+| Rebuild after `git pull` or source changes | `docker compose up -d --build` (in each repo: `git pull` first) |
+
+The containers restart automatically after a Docker Desktop restart (`restart: unless-stopped`), unless you stopped them with `docker compose down`.
+
+### Your data and where it lives
+
+Two named Docker volumes hold everything; both survive `docker compose down`, `docker compose up`, rebuilds and restarts:
+
+| Volume | Contents |
+|---|---|
+| `job-hunter-postgres-data` | the PostgreSQL database: accounts, jobs, stages, settings, encrypted AI keys, MCP token digests |
+| `job-hunter-cv-storage` | uploaded CV PDFs (`/data/cv-storage` in the backend container) |
+
+(Docker prefixes the names with the Compose project name, by default the folder name, e.g. `job-hunter-server_job-hunter-postgres-data`; see `docker volume ls`.)
+
+> **Warning:** `docker compose down -v` (or `--volumes`) **deletes both volumes and all your Job Hunter data**. Use it only when you deliberately want an empty installation. A plain `docker compose down` is safe.
+
+The schema is created and upgraded by Flyway when the backend starts, exactly as in manual development; nothing needs to be run by hand. An existing database is upgraded in place, never reset.
+
+**Export / import is separate from the volumes.** The Docker volumes preserve this installation's complete PostgreSQL and CV data. **Settings → Data → Export job data** is the portable, application-level backup of your jobs, Board, history, stages and AI match results only; it does **not** contain your CV file, account or password, settings, AI keys or the MCP token. Use it to move job data between installations or to keep a copy, and keep in mind it is not a backup of the Docker volumes.
+
+### Claude Desktop integration (optional)
+
+Claude Desktop runs on your machine, outside Docker, and talks to the backend at **http://localhost:8080** (the port published above). Prerequisite: Claude Desktop. You do not need Node.js or npm on your computer:
+
+1. With Job Hunter running, open http://localhost:3000, sign in, go to **Settings → Claude / MCP** and click **Generate token** (shown once).
+2. Build the extension file using Docker only:
+   ```bash
+   cd ../job-hunter-mcp
+   docker build -f Dockerfile.pack --output type=local,dest=. .
+   ```
+   This creates `job-hunter-mcp.mcpb` in that folder.
+3. Open `job-hunter-mcp.mcpb` with Claude Desktop (double-click or drag it in), enter `http://localhost:8080` and the token, enable the extension and start a new chat.
+
+Details and troubleshooting: [`job-hunter-mcp/SETUP.md`](https://github.com/erezalk/job-hunter-mcp/blob/main/SETUP.md).
+
+### Docker notes
+
+- Services: `postgres` (`postgres:17-alpine`), `backend` (this repo's `Dockerfile`; Java 25, non-root), `web` (`../job-hunter-web/Dockerfile`; React build served by nginx, non-root). The backend starts after PostgreSQL is healthy and the web container after the backend is healthy; nginx also looks the backend up on each request, so it recovers by itself when the backend restarts.
+- The browser talks only to the web container; nginx forwards `/api/` to the backend, so the UI and API share one origin and the existing `HttpOnly` `JSESSIONID` session, readable `XSRF-TOKEN` cookie and `X-XSRF-TOKEN` header work unchanged. No security setting is relaxed.
+- Settings passed from `.env` into the backend container: `APP_ENCRYPTION_SECRET`, `APP_INITIAL_USER_EMAIL` / `APP_INITIAL_USER_PASSWORD` / `APP_INITIAL_USER_FULL_NAME`, `SESSION_TIMEOUT`, `CV_MAX_FILE_SIZE_BYTES`, plus `DB_PASSWORD` (default `job_hunter`; only effective before the database volume is first created, since the database is not reachable from outside Docker). Database URL, bind address, CORS origin and CV directory are set by the compose file.
+- Because every browser request now reaches the backend through the web container, the per-IP login/sign-up rate limits see one shared client address. Per-email and per-user limits are unaffected. This is fine for a local, single-user installation.
+- CV records store the absolute path of each file. A database created by a manually started backend therefore contains host paths that the container cannot read; use a fresh Docker installation (or re-upload the CV) rather than pointing the Docker backend at a database created by manual development.
+- Images are built locally and nothing is published to a registry. Images contain no secrets; `.env` is excluded from every build context.
 
 ## Features
 
@@ -35,14 +141,14 @@ Not included: automatic job discovery, scraping or automation of LinkedIn or oth
 
 Java 25, Spring Boot 4 (Web MVC, Security, Data JPA / Hibernate 7, Validation), Flyway, PostgreSQL 17, Apache PDFBox, Maven Wrapper; tests with JUnit 5 and Testcontainers. AI providers are called over plain REST with Spring's `RestClient` (no vendor SDK). Frontend and MCP stacks are described in their repositories.
 
-## Running locally
+## Manual development (without Docker for the app)
 
-Prerequisites: JDK 25, Docker (for PostgreSQL and for the tests), Node.js 20+ for the frontend. No Maven installation is needed (`./mvnw`).
+For contributors who want to run the backend and frontend from source. Prerequisites: JDK 25, Docker (for PostgreSQL and for the tests), Node.js 20+ for the frontend. No Maven installation is needed (`./mvnw`). Do not run this together with the Docker stack: both use port 8080.
 
 ```bash
-# 1. Database (PostgreSQL 17 on 127.0.0.1:5432, data in a named Docker volume)
+# 1. Database only (PostgreSQL 17 on 127.0.0.1:5432, data in a named Docker volume)
 cd job-hunter-server
-docker compose up -d
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d postgres
 
 # 2. Optional local configuration (see "Configuration")
 cp .env.example .env        # then set APP_ENCRYPTION_SECRET if you want AI features
@@ -50,6 +156,8 @@ cp .env.example .env        # then set APP_ENCRYPTION_SECRET if you want AI feat
 # 3. API on http://localhost:8080
 ./mvnw spring-boot:run
 ```
+
+Tip: put `COMPOSE_FILE=docker-compose.yml:docker-compose.dev.yml` in `.env` to drop the `-f` flags. `docker-compose.dev.yml` only adds the loopback-only `5432` port to the database service.
 
 Then start the frontend (see `job-hunter-web/README.md`) and open http://localhost:5173.
 
@@ -65,11 +173,12 @@ Settings come from environment variables; a `.env` file in the directory you sta
 |---|---|---|
 | `APP_ENCRYPTION_SECRET` | *(none)* | Secret used to encrypt AI provider API keys at rest. Required to save a key; the rest of the app works without it. Use a long random value and keep it stable — keys saved under another secret must be re-entered. |
 | `APP_INITIAL_USER_EMAIL` / `APP_INITIAL_USER_PASSWORD` / `APP_INITIAL_USER_FULL_NAME` | *(none)* / *(none)* / `Job Hunter` | Optional bootstrap account, created only when email and password are both set and no user exists |
-| `DB_URL` / `DB_USERNAME` / `DB_PASSWORD` | `jdbc:postgresql://localhost:5432/job_hunter` / `job_hunter` / `job_hunter` | Database (defaults match `docker-compose.yml`; local development only) |
+| `DB_URL` / `DB_USERNAME` / `DB_PASSWORD` | `jdbc:postgresql://localhost:5432/job_hunter` / `job_hunter` / `job_hunter` | Database (defaults match `docker-compose.yml`). With Docker, the compose file sets the URL and user; only `DB_PASSWORD` is read from `.env` |
+| `WEB_HOST_PORT` / `API_HOST_PORT` | `3000` / `8080` | Docker only: host ports (loopback) for the web UI and the backend API |
 | `SERVER_ADDRESS` / `SERVER_PORT` | `127.0.0.1` / `8080` | API bind address and port |
 | `CORS_ALLOWED_ORIGINS` | `http://localhost:5173` | Comma-separated origins allowed to call the API with credentials |
 | `app.auth.rate-limit.*` (application.yml) | login 30/5 min per IP and 10/15 min per email, sign-up 10/h per IP, password change 5/15 min per user | Authentication rate limits (token buckets) |
-| `CV_STORAGE_DIR` | `./data/cv-storage` | Where uploaded CV PDFs are stored |
+| `CV_STORAGE_DIR` | `./data/cv-storage` | Where uploaded CV PDFs are stored (Docker: `/data/cv-storage`, a named volume) |
 | `CV_MAX_FILE_SIZE_BYTES` | `10485760` | Maximum CV upload size |
 | `AI_CONNECT_TIMEOUT_MS` / `AI_READ_TIMEOUT_MS` | `5000` / `45000` | Timeouts for provider calls |
 | `AI_MAX_RETRIES` / `AI_RETRY_INITIAL_BACKOFF_MS` / `AI_RETRY_MAX_WAIT_MS` | `1` / `1000` / `5000` | Retries of transient provider outages (502/503/504/529 only) |
@@ -92,7 +201,7 @@ Settings → Data. **Export job data** downloads `job-hunter-export-YYYY-MM-DD.j
 
 ## Claude Desktop (MCP)
 
-In Settings → Claude / MCP, generate a personal integration token (shown once; only its hash is stored; one per user; revoke or replace at any time). Build and install the `job-hunter-mcp` extension in Claude Desktop and enter the backend URL (`http://localhost:8080`) and the token. Claude can then call `add_job` and `get_companies` (read-only: the names of the companies already in the token owner's account, so Claude can skip them during job discovery); jobs land in New on the token owner's Board, with source "External AI". If Claude passes its own fit evaluation, it is stored as an "External AI" match without calling Gemini/Claude through Job Hunter and without applying the Low Match rule; **Re-evaluate** later replaces it with the configured provider's result. Details: `job-hunter-mcp/README.md`.
+In Settings → Claude / MCP, generate a personal integration token (shown once; only its hash is stored; one per user; revoke or replace at any time). Build the `job-hunter-mcp` extension (with Docker, see the Quick Start above, or `npm run pack` for contributors), install it in Claude Desktop and enter the backend URL (`http://localhost:8080`, also with the Docker stack) and the token. Claude can then call `add_job` and `get_companies` (read-only: the names of the companies already in the token owner's account, so Claude can skip them during job discovery); jobs land in New on the token owner's Board, with source "External AI". If Claude passes its own fit evaluation, it is stored as an "External AI" match without calling Gemini/Claude through Job Hunter and without applying the Low Match rule; **Re-evaluate** later replaces it with the configured provider's result. Details: `job-hunter-mcp/README.md`.
 
 ## Security
 
