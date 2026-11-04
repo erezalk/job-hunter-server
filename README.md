@@ -4,6 +4,12 @@ Job Hunter is a self-hosted tracker for a job search. It keeps every position yo
 
 It was built to replace a spreadsheet: one place for the status of each application, what happened in each interview round, and a quick, explainable fit estimate before investing time in an application.
 
+## Preview
+
+![Job Hunter Board](docs/screenshots/board.png)
+
+*The Board with demo data: drag tickets between columns, star them, and see each job's fit score at a glance. More screenshots are under [Features](#features).*
+
 This repository is the **backend**. The project consists of three repositories, normally cloned side by side:
 
 | Repository | What it is |
@@ -136,6 +142,20 @@ Details and troubleshooting: [`job-hunter-mcp/SETUP.md`](https://github.com/erez
 - **Claude Desktop integration** — the MCP server's `add_job` tool adds a job (optionally with a fit evaluation Claude already made) to the Board of the user who owns the integration token.
 
 Not included: automatic job discovery, scraping or automation of LinkedIn or other job sites.
+
+### Configurable Board columns
+
+Settings → Board chooses which columns appear on your Board. Hiding a column only changes what is shown; applications keep their status.
+
+<img src="docs/screenshots/board-settings.png" alt="Settings → Board: choose which Board columns are visible" width="480">
+
+### Job data export / import
+
+Settings → Data exports all job and Board data as a portable JSON file and restores it into an empty Board. CV, account information, settings and secrets are not included.
+
+<img src="docs/screenshots/data-settings.png" alt="Settings → Data: export and import job data" width="480">
+
+*All screenshots show demo data.*
 
 ## Tech stack
 
