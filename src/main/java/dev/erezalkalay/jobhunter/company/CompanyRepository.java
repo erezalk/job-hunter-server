@@ -14,9 +14,14 @@ public interface CompanyRepository extends Repository<Company, Long> {
 
     boolean existsByUserId(Long userId);
 
-    /** Names only (one row per company: names are unique per user), case-insensitive alphabetical, ties broken by exact name. */
-    @Query("select c.name from Company c where c.user.id = :userId order by lower(c.name), c.name")
-    List<String> findNamesByUserIdOrdered(@Param("userId") Long userId);
+    /**
+     * One {@code [companyName, jobTitle]} row per job the user has at a company (whatever its status), ordered
+     * case-insensitively by company name then title, ties broken by the exact text. Jobs without a company are skipped.
+     */
+    @Query("select c.name, j.title from Job j join j.company c "
+            + "where j.user.id = :userId and c.user.id = :userId "
+            + "order by lower(c.name), c.name, lower(j.title), j.title")
+    List<Object[]> findCompanyNameAndJobTitleByUserIdOrdered(@Param("userId") Long userId);
 
     Company save(Company company);
 

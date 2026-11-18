@@ -20,7 +20,8 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.web.server.LocalServerPort;
 
 /**
- * GET /api/integrations/companies: bearer-token-only, read-only, owner-scoped.
+ * GET /api/integrations/companies: bearer-token-only, read-only, owner-scoped;
+ * each company once with the titles of all its jobs.
  * Every test uses freshly created users so the exact list can be asserted even
  * though the Testcontainers database is shared across the whole run.
  */
@@ -70,7 +71,17 @@ class IntegrationCompaniesIntegrationTest extends IntegrationTestBase {
     private List<String> companyNames(String bearer) throws Exception {
         HttpResponse<String> response = getCompanies(bearer, COMPANIES_URL);
         assertThat(response.statusCode()).isEqualTo(200);
-        return JsonPath.read(response.body(), "$.companies[*].name");
+        return JsonPath.read(response.body(), "$[*].company");
+    }
+
+    private List<Map<String, Object>> companies(String bearer) throws Exception {
+        HttpResponse<String> response = getCompanies(bearer, COMPANIES_URL);
+        assertThat(response.statusCode()).isEqualTo(200);
+        return JsonPath.read(response.body(), "$");
+    }
+
+    private static Map<String, Object> entry(String company, String... positions) {
+        return Map.of("company", company, "positions", List.of(positions));
     }
 
     private long addJob(TestApiClient client, String title, String companyName) throws Exception {
@@ -104,7 +115,39 @@ class IntegrationCompaniesIntegrationTest extends IntegrationTestBase {
     }
 
     @Test
-    void returnsNothingButNamesAndNoIdsOrInternalFields() throws Exception {
+    void groupsEveryPositionUnderItsCompanyWhateverTheStatus() throws Exception {
+        TestApiClient alice = newUser("alice");
+        addJob(alice, "Senior Kotlin Developer", "Scalable Capital");
+        long rejected = addJob(alice, "Senior Java Backend Engineer", "Scalable Capital");
+        long lowMatch = addJob(alice, "Senior Backend Engineer", "N26");
+        long archived = addJob(alice, "Platform Engineer", "N26");
+        addJob(alice, "No Company Role", null);
+        setStatus(alice, rejected, "REJECTED");
+        setStatus(alice, lowMatch, "LOW_MATCH");
+        setStatus(alice, archived, "ARCHIVED");
+        String token = generateToken(alice);
+
+        assertThat(companies(token)).containsExactly(
+                entry("N26", "Platform Engineer", "Senior Backend Engineer"),
+                entry("Scalable Capital", "Senior Java Backend Engineer", "Senior Kotlin Developer"));
+    }
+
+    @Test
+    void aTitleIsListedOnlyOncePerCompany() throws Exception {
+        TestApiClient alice = newUser("alice");
+        addJob(alice, "Backend Engineer", "Acme");
+        // The same title at another company is a different position.
+        addJob(alice, "Backend Engineer", "Beta");
+        // Adding the same company and title again resolves to the existing job (200), so it is never listed twice.
+        assertThat(alice.postJson("/api/board/jobs", "{\"title\":\"backend  engineer\",\"companyName\":\"ACME\"}")
+                .statusCode()).isEqualTo(200);
+        String token = generateToken(alice);
+
+        assertThat(companies(token)).containsExactly(entry("Acme", "Backend Engineer"), entry("Beta", "Backend Engineer"));
+    }
+
+    @Test
+    void returnsNothingButCompanyNamesAndPositionTitles() throws Exception {
         TestApiClient alice = newUser("alice");
         addJob(alice, "Role", "Acme " + run);
         String token = generateToken(alice);
@@ -113,12 +156,12 @@ class IntegrationCompaniesIntegrationTest extends IntegrationTestBase {
 
         assertThat(response.statusCode()).isEqualTo(200);
         assertThat(response.headers().firstValue("Content-Type").orElse("")).startsWith("application/json");
-        Map<String, Object> body = JsonPath.read(response.body(), "$");
-        assertThat(body).containsOnlyKeys("companies");
-        List<Map<String, Object>> companies = JsonPath.read(response.body(), "$.companies");
+        List<Map<String, Object>> companies = JsonPath.read(response.body(), "$");
         assertThat(companies).hasSize(1);
-        assertThat(companies.get(0)).containsOnlyKeys("name");
-        assertThat(response.body()).doesNotContain("\"id\"", "\"user", "email", "website", "notes", "nameKey", "createdAt");
+        assertThat(companies.get(0)).containsOnlyKeys("company", "positions");
+        assertThat(companies.get(0)).isEqualTo(entry("Acme " + run, "Role"));
+        assertThat(response.body()).doesNotContain("\"id\"", "\"user", "email", "website", "notes", "nameKey", "createdAt",
+                "url", "status", "score", "\"name\"");
     }
 
     @Test
@@ -130,7 +173,7 @@ class IntegrationCompaniesIntegrationTest extends IntegrationTestBase {
         HttpResponse<String> response = getCompanies(token, COMPANIES_URL);
 
         assertThat(response.statusCode()).isEqualTo(200);
-        assertThat(JsonPath.<List<Object>>read(response.body(), "$.companies")).isEmpty();
+        assertThat(JsonPath.<List<Object>>read(response.body(), "$")).isEmpty();
     }
 
     @Test
@@ -231,7 +274,7 @@ class IntegrationCompaniesIntegrationTest extends IntegrationTestBase {
         for (String method : List.of("POST", "PUT", "PATCH", "DELETE")) {
             HttpResponse<String> response = bare.send(HttpRequest.newBuilder(URI.create("http://localhost:" + port + COMPANIES_URL))
                     .header("Authorization", "Bearer " + token).header("Content-Type", "application/json")
-                    .method(method, BodyPublishers.ofString("{\"companies\":[{\"name\":\"Injected\"}]}")).build(), BodyHandlers.ofString());
+                    .method(method, BodyPublishers.ofString("[{\"company\":\"Injected\",\"positions\":[\"Role\"]}]")).build(), BodyHandlers.ofString());
             assertThat(response.statusCode()).as(method).isGreaterThanOrEqualTo(400);
         }
         assertThat(companyNames(token)).isEmpty();
