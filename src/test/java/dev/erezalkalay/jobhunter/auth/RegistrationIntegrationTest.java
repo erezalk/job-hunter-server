@@ -103,7 +103,7 @@ class RegistrationIntegrationTest extends IntegrationTestBase {
         assertThat(api.get("/api/stages/upcoming").body()).isEqualTo("[]");
         assertThat((Object) JsonPath.read(api.get("/api/cv").body(), "$.cv")).isNull();
         assertThat(api.getBytes("/api/cv/file").statusCode()).isEqualTo(404);
-        assertThat((Boolean) JsonPath.read(api.get("/api/settings/integrations/mcp-token").body(), "$.configured")).isFalse();
+        assertThat(api.get("/api/settings/integrations/tokens").body()).isEqualTo("[]");
         assertThat(JsonPath.<List<Object>>read(api.get("/api/job-data/export").body(), "$.jobs")).isEmpty();
 
         String settings = api.get("/api/settings").body();

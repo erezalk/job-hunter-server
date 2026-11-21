@@ -30,7 +30,7 @@ import org.springframework.boot.test.web.server.LocalServerPort;
 class JobSourceAndImportedMatchIntegrationTest extends IntegrationTestBase {
 
     private static final String OWNER_EMAIL = "test@jobhunter.local";
-    private static final String TOKEN_URL = "/api/settings/integrations/mcp-token";
+    private static final String TOKEN_URL = "/api/settings/integrations/tokens";
     private static final int THRESHOLD = 70;
 
     @LocalServerPort

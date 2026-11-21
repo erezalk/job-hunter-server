@@ -117,7 +117,7 @@ class OwnershipConstraintsIntegrationTest extends IntegrationTestBase {
         a.postJson("/api/applications/" + applicationA + "/stages", "{\"name\":\"Stage\"}");
         testData.createJobMatch(jobA, 70);
         testData.createJobMatch(jobB, 71);
-        a.postJson("/api/settings/integrations/mcp-token", "{}");
+        a.postJson("/api/settings/integrations/tokens", "{}");
         int othersBefore = othersRowCount();
 
         testData.update("DELETE FROM users WHERE id = ?", userA);

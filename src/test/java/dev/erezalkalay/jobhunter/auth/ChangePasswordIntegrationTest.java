@@ -152,7 +152,7 @@ class ChangePasswordIntegrationTest extends IntegrationTestBase {
                 + "\"minimumFitScore\":55,\"aiProvider\":\"ANTHROPIC\",\"aiModel\":\"test-model\"}").statusCode()).isEqualTo(200);
         assertThat(api.putJson("/api/settings/ai/api-key", "{\"provider\":\"ANTHROPIC\",\"apiKey\":\""
                 + FakeAiProviderState.VALID_API_KEY + "\"}").statusCode()).isEqualTo(200);
-        String token = JsonPath.read(api.postJson("/api/settings/integrations/mcp-token", "{}").body(), "$.token");
+        String token = JsonPath.read(api.postJson("/api/settings/integrations/tokens", "{}").body(), "$.token");
         long userId = testData.userId(email);
         String before = state(userId);
 
@@ -235,7 +235,7 @@ class ChangePasswordIntegrationTest extends IntegrationTestBase {
         assertThat(anonymous.changePassword(OLD, NEW, NEW).statusCode()).isEqualTo(401);
 
         // An MCP token is not a login: rejected here like on every non-integration endpoint.
-        String token = JsonPath.read(api.postJson("/api/settings/integrations/mcp-token", "{}").body(), "$.token");
+        String token = JsonPath.read(api.postJson("/api/settings/integrations/tokens", "{}").body(), "$.token");
         HttpResponse<String> withToken = HttpClient.newHttpClient().send(HttpRequest.newBuilder(URI.create(base() + "/api/auth/change-password"))
                 .header("Authorization", "Bearer " + token).header("Content-Type", "application/json")
                 .POST(HttpRequest.BodyPublishers.ofString("{\"currentPassword\":\"" + OLD + "\",\"newPassword\":\"" + NEW
@@ -286,7 +286,7 @@ class ChangePasswordIntegrationTest extends IntegrationTestBase {
                 testData.strings("SELECT theme || timezone || visible_board_statuses || minimum_fit_score || coalesce(ai_provider, '') "
                         + "|| coalesce(ai_model, '') || coalesce(anthropic_api_key_encrypted, '') || coalesce(gemini_api_key_encrypted, '') "
                         + "|| updated_at FROM settings WHERE user_id = ?", userId),
-                testData.strings("SELECT token_hash || token_suffix || created_at FROM integration_tokens WHERE user_id = ?", userId),
+                testData.strings("SELECT id || token_hash || token_suffix || coalesce(name, '') || created_at || coalesce(regenerated_at::text, '') FROM integration_tokens WHERE user_id = ? ORDER BY id", userId),
                 testData.strings("SELECT email || full_name || created_at FROM users WHERE id = ?", userId))
                 .map(Object::toString)
                 .collect(java.util.stream.Collectors.joining("\n"));

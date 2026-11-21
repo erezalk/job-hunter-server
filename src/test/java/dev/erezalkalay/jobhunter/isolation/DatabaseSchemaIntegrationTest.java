@@ -32,7 +32,7 @@ class DatabaseSchemaIntegrationTest extends IntegrationTestBase {
         assertThat(flyway(url).migrate().success).isTrue();
 
         assertThat(query(url, "SELECT version || ' ' || description || ' ' || success FROM flyway_schema_history ORDER BY installed_rank"))
-                .containsExactly("1 initial schema true", "2 add stage scheduled end at true");
+                .containsExactly("1 initial schema true", "2 add stage scheduled end at true", "3 multiple integration tokens true");
         assertThat(schema(url)).isEqualTo(schema(POSTGRES.getJdbcUrl()));
         assertThat(String.join("\n", schema(url))).contains("jobs.user_id bigint NO", "uq_jobs_user_company_title",
                 "FOREIGN KEY (job_id, user_id) REFERENCES jobs(id, user_id) ON DELETE CASCADE",
@@ -73,6 +73,95 @@ class DatabaseSchemaIntegrationTest extends IntegrationTestBase {
     }
 
     @Test
+    void theMultipleTokensMigrationKeepsEveryExistingTokenAsAnUnnamedTokenAndAllowsMore() throws Exception {
+        String url = createDatabase("schema_tokens");
+        assertThat(flyway(url, "2").migrate().success).isTrue();
+        exec(url,
+                "INSERT INTO users (email, password_hash, full_name) VALUES ('with-token@example.com', 'x', 'With')",
+                "INSERT INTO users (email, password_hash, full_name) VALUES ('without-token@example.com', 'x', 'Without')",
+                "INSERT INTO users (email, password_hash, full_name) VALUES ('second@example.com', 'x', 'Second')",
+                "INSERT INTO integration_tokens (user_id, token_hash, token_suffix, created_at) SELECT id, '"
+                        + "a".repeat(64) + "', 'aaaa', '2026-01-02 03:04:05.678901+00' FROM users WHERE email = 'with-token@example.com'",
+                "INSERT INTO integration_tokens (user_id, token_hash, token_suffix) SELECT id, '"
+                        + "b".repeat(64) + "', 'bbbb' FROM users WHERE email = 'second@example.com'");
+        String tokens = "SELECT t.id || '|' || u.email || '|' || t.token_hash || '|' || t.token_suffix || '|' || t.created_at "
+                + "FROM integration_tokens t JOIN users u ON u.id = t.user_id ORDER BY t.id";
+        List<String> before = query(url, tokens);
+        // The old schema allowed only one token per user.
+        assertThatThrownBy(() -> exec(url, "INSERT INTO integration_tokens (user_id, token_hash, token_suffix) SELECT id, '"
+                + "c".repeat(64) + "', 'cccc' FROM users WHERE email = 'with-token@example.com'"))
+                .hasMessageContaining("uq_integration_tokens_user");
+
+        assertThat(flyway(url).migrate().success).isTrue();
+
+        // Same ids, owners, digests, suffixes and creation times: configured clients keep working.
+        assertThat(query(url, tokens)).isEqualTo(before).hasSize(2);
+        assertThat(query(url, "SELECT count(*) FROM integration_tokens WHERE name IS NULL AND regenerated_at IS NULL")).containsExactly("2");
+        assertThat(query(url, "SELECT count(*) FROM integration_tokens t JOIN users u ON u.id = t.user_id "
+                + "WHERE u.email = 'without-token@example.com'")).containsExactly("0");
+        assertThat(query(url, "SELECT column_name || ' ' || data_type || ' ' || coalesce(character_maximum_length::text, '-') || ' ' "
+                + "|| is_nullable FROM information_schema.columns WHERE table_name = 'integration_tokens' "
+                + "AND column_name IN ('name', 'regenerated_at') ORDER BY 1"))
+                .containsExactly("name character varying 100 YES", "regenerated_at timestamp with time zone - YES");
+        assertThat(query(url, "SELECT indexdef FROM pg_indexes WHERE indexname = 'idx_integration_tokens_user'"))
+                .singleElement().asString().contains("(user_id)");
+
+        // Now several tokens per user, digests still unique, names never blank.
+        exec(url, "INSERT INTO integration_tokens (user_id, token_hash, token_suffix, name) SELECT id, '"
+                + "c".repeat(64) + "', 'cccc', 'Codex' FROM users WHERE email = 'with-token@example.com'");
+        assertThat(query(url, "SELECT count(*) FROM integration_tokens t JOIN users u ON u.id = t.user_id "
+                + "WHERE u.email = 'with-token@example.com'")).containsExactly("2");
+        assertThatThrownBy(() -> exec(url, "INSERT INTO integration_tokens (user_id, token_hash, token_suffix) SELECT id, '"
+                + "a".repeat(64) + "', 'aaaa' FROM users WHERE email = 'second@example.com'"))
+                .hasMessageContaining("uq_integration_tokens_hash");
+        assertThatThrownBy(() -> exec(url, "UPDATE integration_tokens SET name = '   ' WHERE token_suffix = 'aaaa'"))
+                .hasMessageContaining("ck_integration_tokens_name_not_blank");
+        // Deleting a user still removes exactly that user's tokens.
+        exec(url, "DELETE FROM users WHERE email = 'with-token@example.com'");
+        assertThat(query(url, "SELECT token_suffix FROM integration_tokens ORDER BY id")).containsExactly("bbbb");
+    }
+
+    @Test
+    void aFullDatabaseBackupAndRestoreKeepsEveryTokenWithItsOwner() throws Exception {
+        String source = "backup_source_" + System.nanoTime();
+        String target = "backup_target_" + System.nanoTime();
+        exec(POSTGRES.getJdbcUrl(), "CREATE DATABASE " + source);
+        String sourceUrl = urlOf(source);
+        assertThat(flyway(sourceUrl).migrate().success).isTrue();
+        exec(sourceUrl,
+                "INSERT INTO users (email, password_hash, full_name) VALUES ('alice@example.com', 'x', 'Alice')",
+                "INSERT INTO users (email, password_hash, full_name) VALUES ('bob@example.com', 'x', 'Bob')",
+                "INSERT INTO integration_tokens (user_id, token_hash, token_suffix, name) SELECT id, '"
+                        + "1".repeat(64) + "', '1111', 'Claude Desktop' FROM users WHERE email = 'alice@example.com'",
+                "INSERT INTO integration_tokens (user_id, token_hash, token_suffix, regenerated_at) SELECT id, '"
+                        + "2".repeat(64) + "', '2222', now() FROM users WHERE email = 'alice@example.com'",
+                "INSERT INTO integration_tokens (user_id, token_hash, token_suffix, name) SELECT id, '"
+                        + "3".repeat(64) + "', '3333', 'Codex' FROM users WHERE email = 'bob@example.com'");
+        String tokens = "SELECT t.id || '|' || u.email || '|' || t.token_hash || '|' || t.token_suffix || '|' || coalesce(t.name, '-') "
+                + "|| '|' || t.created_at || '|' || coalesce(t.regenerated_at::text, '-') "
+                + "FROM integration_tokens t JOIN users u ON u.id = t.user_id ORDER BY t.id";
+        List<String> before = query(sourceUrl, tokens);
+
+        // The documented full backup: pg_dump of the whole database, restored with pg_restore into an empty one.
+        inContainer("pg_dump", "-Fc -f /tmp/" + source + ".dump " + source);
+        inContainer("createdb", target);
+        inContainer("pg_restore", "--exit-on-error -d " + target + " /tmp/" + source + ".dump");
+        String targetUrl = urlOf(target);
+
+        assertThat(query(targetUrl, tokens)).isEqualTo(before).hasSize(3);
+        assertThat(flyway(targetUrl).validateWithResult().validationSuccessful).isTrue();
+        // The token table keeps its ownership cascade, unique digest, name check and owner index.
+        String tokenTable = "SELECT conname || ' ' || contype::text FROM pg_constraint WHERE conrelid = 'integration_tokens'::regclass "
+                + "UNION ALL SELECT indexdef FROM pg_indexes WHERE tablename = 'integration_tokens' ORDER BY 1";
+        assertThat(query(targetUrl, tokenTable)).isEqualTo(query(sourceUrl, tokenTable))
+                .contains("fk_integration_tokens_user f", "uq_integration_tokens_hash u", "ck_integration_tokens_name_not_blank c");
+        // New tokens in the restored database continue the id sequence instead of colliding.
+        exec(targetUrl, "INSERT INTO integration_tokens (user_id, token_hash, token_suffix) SELECT id, '"
+                + "4".repeat(64) + "', '4444' FROM users WHERE email = 'bob@example.com'");
+        assertThat(query(targetUrl, "SELECT count(*) FROM integration_tokens")).containsExactly("4");
+    }
+
+    @Test
     void everyTableWithAnOwnerRequiresOneAndIsDeletedWithIt() throws Exception {
         String url = POSTGRES.getJdbcUrl();
         List<String> ownedTables = List.of("applications", "companies", "cvs", "integration_tokens", "job_matches", "jobs", "settings");
@@ -104,7 +193,18 @@ class DatabaseSchemaIntegrationTest extends IntegrationTestBase {
     private static String createDatabase(String prefix) throws Exception {
         String name = prefix + "_" + System.nanoTime();
         exec(POSTGRES.getJdbcUrl(), "CREATE DATABASE " + name);
-        return POSTGRES.getJdbcUrl().replaceFirst("/[^/?]+(\\?|$)", "/" + name + "$1");
+        return urlOf(name);
+    }
+
+    private static String urlOf(String database) {
+        return POSTGRES.getJdbcUrl().replaceFirst("/[^/?]+(\\?|$)", "/" + database + "$1");
+    }
+
+    /** Runs a PostgreSQL client tool inside the database container, as the test user. */
+    private static void inContainer(String tool, String arguments) throws Exception {
+        var result = POSTGRES.execInContainer("sh", "-c", "PGPASSWORD='" + POSTGRES.getPassword() + "' " + tool
+                + " -U " + POSTGRES.getUsername() + " -h localhost " + arguments);
+        assertThat(result.getExitCode()).as(tool + ": " + result.getStderr()).isZero();
     }
 
     private static Flyway flyway(String url) {
