@@ -70,7 +70,7 @@ class RegisteredAccountsIsolationIntegrationTest extends IntegrationTestBase {
                 + "\"minimumFitScore\":55,\"aiProvider\":\"ANTHROPIC\",\"aiModel\":\"test-model\"}").statusCode()).isEqualTo(200);
         assertThat(a.putJson("/api/settings/ai/api-key", "{\"provider\":\"ANTHROPIC\",\"apiKey\":\""
                 + FakeAiProviderState.VALID_API_KEY + "\"}").statusCode()).isEqualTo(200);
-        aToken = JsonPath.read(a.postJson("/api/settings/integrations/mcp-token", "{}").body(), "$.token");
+        aToken = JsonPath.read(a.postJson("/api/settings/integrations/tokens", "{}").body(), "$.token");
 
         HttpResponse<String> added = a.postJson("/api/board/jobs", "{\"title\":\"" + TITLE + "\",\"companyName\":\"" + COMPANY
                 + "\",\"description\":\"" + A_SECRET_TEXT + "\"}");
@@ -102,7 +102,7 @@ class RegisteredAccountsIsolationIntegrationTest extends IntegrationTestBase {
         assertThat(JsonPath.<List<Object>>read(b.get("/api/job-data/export").body(), "$.jobs")).isEmpty();
         assertThat((Object) JsonPath.read(b.get("/api/cv").body(), "$.cv")).isNull();
         assertThat(b.getBytes("/api/cv/file").statusCode()).isEqualTo(404);
-        assertThat((Boolean) JsonPath.read(b.get("/api/settings/integrations/mcp-token").body(), "$.configured")).isFalse();
+        assertThat(b.get("/api/settings/integrations/tokens").body()).isEqualTo("[]");
 
         String bSettings = b.get("/api/settings").body();
         assertThat(JsonPath.<String>read(bSettings, "$.theme")).isEqualTo("SYSTEM");
@@ -189,9 +189,13 @@ class RegisteredAccountsIsolationIntegrationTest extends IntegrationTestBase {
                 + "\"minimumFitScore\":90,\"aiProvider\":\"GEMINI\",\"aiModel\":\"b-model\"}").statusCode()).isEqualTo(200);
         assertThat(b.putJson("/api/settings/ai/api-key", "{\"provider\":\"GEMINI\",\"apiKey\":\"b-key\"}").statusCode()).isEqualTo(200);
         assertThat(b.deleteRequest("/api/settings/ai").statusCode()).isEqualTo(204);
-        String bToken = JsonPath.read(b.postJson("/api/settings/integrations/mcp-token", "{}").body(), "$.token");
+        String bIssued = b.postJson("/api/settings/integrations/tokens", "{\"name\":\"B client\"}").body();
+        String bToken = JsonPath.read(bIssued, "$.token");
         assertThat(bToken).isNotEqualTo(aToken);
-        assertThat(b.deleteRequest("/api/settings/integrations/mcp-token").statusCode()).isEqualTo(204);
+        long bTokenId = JsonPath.<Number>read(bIssued, "$.id").longValue();
+        assertThat(b.patchJson("/api/settings/integrations/tokens/" + bTokenId, "{\"name\":\"renamed\"}").statusCode()).isEqualTo(200);
+        assertThat(b.postJson("/api/settings/integrations/tokens/" + bTokenId + "/regenerate", "{}").statusCode()).isEqualTo(200);
+        assertThat(b.deleteRequest("/api/settings/integrations/tokens/" + bTokenId).statusCode()).isEqualTo(204);
 
         assertThat(snapshotOfA()).isEqualTo(before);
         // A's token still adds to A's Board only.
@@ -234,9 +238,9 @@ class RegisteredAccountsIsolationIntegrationTest extends IntegrationTestBase {
                 + "\n" + a.get(app(aApplication)).body().replaceAll("\"timestamp\":\"[^\"]*\"", "")
                 + "\n" + a.get(app(aApplication) + "/stages").body() + "\n" + a.get(app(aApplication) + "/status-history").body()
                 + "\n" + a.get("/api/jobs/" + aJob + "/match").body() + "\n" + a.get("/api/settings").body()
-                + "\n" + a.get("/api/cv").body() + "\n" + a.get("/api/settings/integrations/mcp-token").body()
+                + "\n" + a.get("/api/cv").body() + "\n" + a.get("/api/settings/integrations/tokens").body()
                 + "\n" + testData.strings("SELECT coalesce(anthropic_api_key_encrypted, '') || updated_at FROM settings WHERE user_id = ?", aUserId)
-                + "\n" + testData.strings("SELECT token_hash FROM integration_tokens WHERE user_id = ?", aUserId)
+                + "\n" + testData.strings("SELECT id || token_hash || coalesce(name, '') || coalesce(regenerated_at::text, '') FROM integration_tokens WHERE user_id = ? ORDER BY id", aUserId)
                 + "\n" + testData.strings("SELECT id || storage_path || is_primary FROM cvs WHERE user_id = ? ORDER BY id", aUserId)
                 + "\n" + testData.strings("SELECT email || password_hash || updated_at FROM users WHERE id = ?", aUserId);
     }

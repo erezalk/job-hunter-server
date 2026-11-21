@@ -153,7 +153,7 @@ class InputValidationIntegrationTest extends IntegrationTestBase {
 
     @Test
     void theMcpEndpointAppliesTheSameDescriptionLimit() throws Exception {
-        String token = JsonPath.read(client.postJson("/api/settings/integrations/mcp-token", "{}").body(), "$.token");
+        String token = JsonPath.read(client.postJson("/api/settings/integrations/tokens", "{}").body(), "$.token");
         String title = "Mcp Huge Description " + System.nanoTime();
 
         HttpResponse<String> response = HttpClient.newHttpClient().send(HttpRequest.newBuilder(

@@ -16,7 +16,7 @@ This repository is the **backend**. The project consists of three repositories, 
 |---|---|
 | `job-hunter-server` (this one) | Java / Spring Boot REST API, PostgreSQL schema, AI provider integration |
 | `job-hunter-web` | React / TypeScript single-page UI |
-| `job-hunter-mcp` | Local stdio MCP server for Claude Desktop (`add_job` and read-only `get_companies` tools) |
+| `job-hunter-mcp` | Local stdio MCP server for Claude Desktop (`add_job` and read-only `get_companies` and `get_excluded_companies` tools) |
 
 ```
 Docker (docker compose up --build)
@@ -104,13 +104,13 @@ Two named Docker volumes hold everything; both survive `docker compose down`, `d
 
 The schema is created and upgraded by Flyway when the backend starts, exactly as in manual development; nothing needs to be run by hand. An existing database is upgraded in place, never reset.
 
-**Export / import is separate from the volumes.** The Docker volumes preserve this installation's complete PostgreSQL and CV data. **Settings → Data → Export job data** is the portable, application-level backup of your jobs, Board, history, stages and AI match results only; it does **not** contain your CV file, account or password, settings, AI keys or the MCP token. Use it to move job data between installations or to keep a copy, and keep in mind it is not a backup of the Docker volumes.
+**Export / import is separate from the volumes.** The Docker volumes preserve this installation's complete PostgreSQL and CV data. **Settings → Data → Export job data** is the portable, application-level backup of your jobs, Board, history, stages and AI match results only; it does **not** contain your CV file, account or password, settings, AI keys or MCP integration tokens (importing never revokes or replaces your tokens). Use it to move job data between installations or to keep a copy, and keep in mind it is not a backup of the Docker volumes.
 
 ### Claude Desktop integration (optional)
 
 Claude Desktop runs on your machine, outside Docker, and talks to the backend at **http://localhost:8080** (the port published above). Prerequisite: Claude Desktop. You do not need Node.js or npm on your computer:
 
-1. With Job Hunter running, open http://localhost:3000, sign in, go to **Settings → Claude / MCP** and click **Generate token** (shown once).
+1. With Job Hunter running, open http://localhost:3000, sign in, go to **Settings → Claude / MCP**, optionally name the token (e.g. `Claude Desktop`) and click **Generate token** (shown once). Create a separate token for every client, e.g. one for Claude Desktop and one for Codex.
 2. Build the extension file using Docker only:
    ```bash
    cd ../job-hunter-mcp
@@ -221,7 +221,7 @@ Settings → Data. **Export job data** downloads `job-hunter-export-YYYY-MM-DD.j
 
 ## Claude Desktop (MCP)
 
-In Settings → Claude / MCP, generate a personal integration token (shown once; only its hash is stored; one per user; revoke or replace at any time). Build the `job-hunter-mcp` extension (with Docker, see the Quick Start above, or `npm run pack` for contributors), install it in Claude Desktop and enter the backend URL (`http://localhost:8080`, also with the Docker stack) and the token. Claude can then call `add_job` and `get_companies` (read-only: the companies already on the token owner's board, each with the titles of its positions, so Claude can skip them during job discovery); jobs land in New on the token owner's Board, with source "External AI". If Claude passes its own fit evaluation, it is stored as an "External AI" match without calling Gemini/Claude through Job Hunter and without applying the Low Match rule; **Re-evaluate** later replaces it with the configured provider's result. Details: `job-hunter-mcp/README.md`.
+In Settings → Claude / MCP, generate a personal integration token per client (shown once; only its hash is stored). A user can have any number of active tokens, each with an optional, editable name (e.g. "Claude Desktop", "Codex"); each can be renamed, regenerated (new secret, same id and name, the old secret stops working at once) or revoked on its own, without affecting the others. Tokens do not expire. Build the `job-hunter-mcp` extension (with Docker, see the Quick Start above, or `npm run pack` for contributors), install it in Claude Desktop and enter the backend URL (`http://localhost:8080`, also with the Docker stack) and the token. Claude can then call `add_job`, `get_companies` (read-only: the companies already on the token owner's board, each with the titles of its positions, so Claude avoids duplicate jobs) and `get_excluded_companies` (read-only: the companies listed in Settings → Job Discovery → Excluded Companies, which Claude skips entirely during job searches; the list never affects the Board and never blocks adding a job, and it can only be edited in the UI); jobs land in New on the token owner's Board, with source "External AI". If Claude passes its own fit evaluation, it is stored as an "External AI" match without calling Gemini/Claude through Job Hunter and without applying the Low Match rule; **Re-evaluate** later replaces it with the configured provider's result. Details: `job-hunter-mcp/README.md`.
 
 ## Security
 
@@ -246,9 +246,10 @@ All endpoints except `POST /api/auth/login`, `POST /api/auth/register` and `GET 
 | CV | `GET`/`POST /api/cv`, `GET /api/cv/file` |
 | AI match | `GET /api/jobs/{jobId}/match`, `POST /api/jobs/{jobId}/match/evaluate?force=` |
 | Settings | `GET`/`PUT /api/settings`, `PUT`/`DELETE /api/settings/ai/api-key`, `DELETE /api/settings/ai`, `POST /api/settings/ai/test-connection` |
-| MCP token | `GET`/`POST`/`DELETE /api/settings/integrations/mcp-token` |
+| Excluded companies | `GET`/`POST /api/settings/excluded-companies`, `PATCH`/`DELETE .../excluded-companies/{id}` (names trimmed, unique per user ignoring case; 409 on a duplicate) |
+| Integration tokens | `GET`/`POST /api/settings/integrations/tokens`, `PATCH`/`DELETE .../tokens/{id}`, `POST .../tokens/{id}/regenerate` |
 | Job data | `GET /api/job-data/export`, `POST /api/job-data/import` |
-| Integration | `POST /api/integrations/jobs`, `GET /api/integrations/companies` (bearer token) |
+| Integration | `POST /api/integrations/jobs`, `GET /api/integrations/companies`, `GET /api/integrations/excluded-companies` (bearer token) |
 
 ## Tests
 

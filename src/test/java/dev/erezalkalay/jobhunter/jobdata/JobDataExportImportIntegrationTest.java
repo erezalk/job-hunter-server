@@ -187,7 +187,13 @@ class JobDataExportImportIntegrationTest extends IntegrationTestBase {
     void exportContainsOnlyTheCurrentUsersBoardAndNoCvSettingsAccountOrSecrets() throws Exception {
         // This user: a CV, settings, an AI key and an MCP token — none of which may appear.
         configureAi(client);
-        String token = JsonPath.read(client.postJson("/api/settings/integrations/mcp-token", "{}").body(), "$.token");
+        String token = JsonPath.read(client.postJson("/api/settings/integrations/tokens", "{\"name\":\"Claude Desktop " + run + "\"}")
+                .body(), "$.token");
+        String secondToken = JsonPath.read(client.postJson("/api/settings/integrations/tokens", "{\"name\":\"Codex " + run + "\"}")
+                .body(), "$.token");
+        List<String> tokenHashes = testData.strings("SELECT t.token_hash FROM integration_tokens t JOIN users u ON u.id = t.user_id "
+                + "WHERE u.email = ?", email);
+        assertThat(tokenHashes).hasSize(2);
         String sameTitle = "Same Role " + run;
         addJob(client, sameTitle, "Same Co " + run, "My description");
 
@@ -210,7 +216,9 @@ class JobDataExportImportIntegrationTest extends IntegrationTestBase {
         assertThat(JsonPath.<String>read(export, "$.jobs[0].description")).isEqualTo("My description");
         assertThat(export).doesNotContain("OTHER USER").doesNotContain("Other Only Role").doesNotContain("OFFER")
                 .doesNotContain(CV_TEXT).doesNotContain("cv.pdf").doesNotContain(FakeAiProviderState.VALID_API_KEY)
-                .doesNotContain(token).doesNotContain(email)
+                .doesNotContain(token).doesNotContain(secondToken).doesNotContain(tokenHashes.get(0)).doesNotContain(tokenHashes.get(1))
+                .doesNotContain("Claude Desktop").doesNotContain("Codex").doesNotContain("integration").doesNotContain("jh_")
+                .doesNotContain(email)
                 .doesNotContain(otherEmail).doesNotContain("Europe/Berlin").doesNotContain("test-model")
                 .doesNotContain("password").doesNotContain("fingerprint").doesNotContain("visibleBoardStatuses")
                 .doesNotContain("minimumFitScore").doesNotContain("theme");
@@ -266,7 +274,7 @@ class JobDataExportImportIntegrationTest extends IntegrationTestBase {
 
     @Test
     void theMcpBearerTokenCannotExportOrImport() throws Exception {
-        String token = JsonPath.read(client.postJson("/api/settings/integrations/mcp-token", "{}").body(), "$.token");
+        String token = JsonPath.read(client.postJson("/api/settings/integrations/tokens", "{}").body(), "$.token");
         HttpClient http = HttpClient.newHttpClient();
         HttpResponse<String> export = http.send(HttpRequest.newBuilder(URI.create("http://localhost:" + port + EXPORT))
                 .header("Authorization", "Bearer " + token).GET().build(), HttpResponse.BodyHandlers.ofString());
@@ -413,8 +421,17 @@ class JobDataExportImportIntegrationTest extends IntegrationTestBase {
         configureAi(client);
         String settingsBefore = client.get("/api/settings").body();
         String cvBefore = client.get("/api/cv").body();
-        String tokenBefore = client.get("/api/settings/integrations/mcp-token").body();
-        ObjectNode stagedJob = job("a", "Restored Role " + run);
+        // Two integration tokens (e.g. Claude Desktop and Codex): the restore must neither revoke nor replace them.
+        String claudeToken = JsonPath.read(client.postJson("/api/settings/integrations/tokens", "{\"name\":\"Claude Desktop\"}")
+                .body(), "$.token");
+        String codexToken = JsonPath.read(client.postJson("/api/settings/integrations/tokens", "{\"name\":\"Codex\"}")
+                .body(), "$.token");
+        String tokenBefore = client.get("/api/settings/integrations/tokens").body();
+        String tokenRowsSql = "SELECT t.id || t.token_hash || t.token_suffix || coalesce(t.name, '') || t.created_at "
+                + "|| coalesce(t.regenerated_at::text, '') FROM integration_tokens t JOIN users u ON u.id = t.user_id "
+                + "WHERE u.email = ? ORDER BY t.id";
+        List<String> tokenRowsBefore = testData.strings(tokenRowsSql, email);
+        ObjectNode stagedJob = withCompany(job("a", "Restored Role " + run), "Restored Co " + run);
         ((ObjectNode) stagedJob.get("application")).put("status", "INTERVIEW_PROCESS").put("starred", true)
                 .put("boardPosition", 3).put("notes", "restored notes").put("appliedAt", "2025-02-02T09:00:00Z");
         ((ArrayNode) stagedJob.get("application").get("statusHistory")).addObject()
@@ -454,7 +471,16 @@ class JobDataExportImportIntegrationTest extends IntegrationTestBase {
         // CV, settings and integration token are untouched.
         assertThat(client.get("/api/settings").body()).isEqualTo(settingsBefore);
         assertThat(client.get("/api/cv").body()).isEqualTo(cvBefore);
-        assertThat(client.get("/api/settings/integrations/mcp-token").body()).isEqualTo(tokenBefore);
+        assertThat(client.get("/api/settings/integrations/tokens").body()).isEqualTo(tokenBefore);
+        assertThat(testData.strings(tokenRowsSql, email)).isEqualTo(tokenRowsBefore).hasSize(2);
+        // ...and both still work, now seeing the restored jobs.
+        for (String bearer : List.of(claudeToken, codexToken)) {
+            HttpResponse<String> companies = HttpClient.newHttpClient().send(HttpRequest.newBuilder(
+                            URI.create("http://localhost:" + port + "/api/integrations/companies"))
+                    .header("Authorization", "Bearer " + bearer).GET().build(), HttpResponse.BodyHandlers.ofString());
+            assertThat(companies.statusCode()).isEqualTo(200);
+            assertThat(companies.body()).contains("Restored Co " + run).contains("Restored Role " + run);
+        }
     }
 
     @Test
@@ -522,7 +548,7 @@ class JobDataExportImportIntegrationTest extends IntegrationTestBase {
                 "{\"name\":\"Final\",\"scheduledAt\":\"2025-05-05T12:00:00Z\",\"outcome\":\"Rejected\",\"notes\":\"no feedback\"}");
 
         // 6. Added through MCP with an imported (External AI) fit.
-        String token = JsonPath.read(client.postJson("/api/settings/integrations/mcp-token", "{}").body(), "$.token");
+        String token = JsonPath.read(client.postJson("/api/settings/integrations/tokens", "{}").body(), "$.token");
         HttpResponse<String> mcp = HttpClient.newHttpClient().send(HttpRequest.newBuilder(
                         URI.create("http://localhost:" + port + "/api/integrations/jobs"))
                 .header("Authorization", "Bearer " + token).header("Content-Type", "application/json")

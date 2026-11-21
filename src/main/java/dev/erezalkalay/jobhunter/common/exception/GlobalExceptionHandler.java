@@ -4,6 +4,7 @@ import dev.erezalkalay.jobhunter.auth.EmailAlreadyRegisteredException;
 import dev.erezalkalay.jobhunter.auth.ratelimit.RateLimitExceededException;
 import dev.erezalkalay.jobhunter.common.crypto.EncryptionNotConfiguredException;
 import dev.erezalkalay.jobhunter.common.crypto.StoredSecretUnreadableException;
+import dev.erezalkalay.jobhunter.excludedcompany.DuplicateExcludedCompanyException;
 import dev.erezalkalay.jobhunter.jobdata.ImportConflictException;
 import dev.erezalkalay.jobhunter.jobdata.ImportTooLargeException;
 import dev.erezalkalay.jobhunter.jobdata.ImportValidationException;
@@ -70,6 +71,12 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
     public ResponseEntity<ApiError> handleEmailAlreadyRegistered(EmailAlreadyRegisteredException ex, HttpServletRequest request) {
         return ResponseEntity.status(HttpStatus.CONFLICT).body(new ApiError(Instant.now(), 409, "Conflict", ex.getMessage(),
                 null, request.getRequestURI(), null, List.of(new ApiError.FieldError("email", ex.getMessage()))));
+    }
+
+    @ExceptionHandler(DuplicateExcludedCompanyException.class)
+    public ResponseEntity<ApiError> handleDuplicateExcludedCompany(DuplicateExcludedCompanyException ex, HttpServletRequest request) {
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(new ApiError(Instant.now(), 409, "Conflict", ex.getMessage(),
+                null, request.getRequestURI(), null, List.of(new ApiError.FieldError("name", ex.getMessage()))));
     }
 
     @ExceptionHandler(RateLimitExceededException.class)

@@ -318,8 +318,8 @@ class MultiUserIsolationIntegrationTest extends IntegrationTestBase {
 
     @Test
     void mcpTokensActOnlyForTheirOwnUser() throws Exception {
-        String aToken = JsonPath.read(a.postJson("/api/settings/integrations/mcp-token", "{}").body(), "$.token");
-        String bToken = JsonPath.read(b.postJson("/api/settings/integrations/mcp-token", "{}").body(), "$.token");
+        String aToken = JsonPath.read(a.postJson("/api/settings/integrations/tokens", "{}").body(), "$.token");
+        String bToken = JsonPath.read(b.postJson("/api/settings/integrations/tokens", "{}").body(), "$.token");
         String before = snapshotOfA();
 
         // B's token adding the very same job creates B's own ticket, with B's imported fit.

@@ -29,7 +29,7 @@ class IntegrationCompaniesIntegrationTest extends IntegrationTestBase {
 
     private static final String PASSWORD = "companies-password-123";
     private static final String COMPANIES_URL = "/api/integrations/companies";
-    private static final String TOKEN_URL = "/api/settings/integrations/mcp-token";
+    private static final String TOKEN_URL = "/api/settings/integrations/tokens";
 
     @LocalServerPort
     private int port;
@@ -56,7 +56,7 @@ class IntegrationCompaniesIntegrationTest extends IntegrationTestBase {
 
     private String generateToken(TestApiClient client) throws Exception {
         HttpResponse<String> response = client.postJson(TOKEN_URL, "{}");
-        assertThat(response.statusCode()).isEqualTo(200);
+        assertThat(response.statusCode()).isEqualTo(201);
         return JsonPath.read(response.body(), "$.token");
     }
 
@@ -218,18 +218,29 @@ class IntegrationCompaniesIntegrationTest extends IntegrationTestBase {
     }
 
     @Test
-    void replacedAndRevokedTokensStopWorkingImmediately() throws Exception {
+    void regeneratedAndRevokedTokensStopWorkingImmediatelyWhileTheOtherTokensKeepWorking() throws Exception {
         TestApiClient alice = newUser("alice");
         addJob(alice, "Role", "Acme " + run);
-        String first = generateToken(alice);
+        HttpResponse<String> firstIssued = alice.postJson(TOKEN_URL, "{\"name\":\"Claude Desktop\"}");
+        long firstId = JsonPath.<Number>read(firstIssued.body(), "$.id").longValue();
+        String first = JsonPath.read(firstIssued.body(), "$.token");
+        String other = generateToken(alice);
         assertThat(companyNames(first)).containsExactly("Acme " + run);
 
-        String second = generateToken(alice);
+        // Creating another token replaces nothing.
+        assertThat(companyNames(other)).containsExactly("Acme " + run);
+        assertThat(companyNames(first)).containsExactly("Acme " + run);
+
+        HttpResponse<String> regenerated = alice.postJson(TOKEN_URL + "/" + firstId + "/regenerate", "{}");
+        assertThat(regenerated.statusCode()).isEqualTo(200);
+        String second = JsonPath.read(regenerated.body(), "$.token");
         assertThat(getCompanies(first, COMPANIES_URL).statusCode()).isEqualTo(401);
         assertThat(companyNames(second)).containsExactly("Acme " + run);
+        assertThat(companyNames(other)).containsExactly("Acme " + run);
 
-        assertThat(alice.deleteRequest(TOKEN_URL).statusCode()).isEqualTo(204);
+        assertThat(alice.deleteRequest(TOKEN_URL + "/" + firstId).statusCode()).isEqualTo(204);
         assertThat(getCompanies(second, COMPANIES_URL).statusCode()).isEqualTo(401);
+        assertThat(companyNames(other)).containsExactly("Acme " + run);
     }
 
     @Test
