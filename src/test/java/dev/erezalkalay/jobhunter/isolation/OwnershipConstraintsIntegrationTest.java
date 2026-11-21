@@ -118,11 +118,13 @@ class OwnershipConstraintsIntegrationTest extends IntegrationTestBase {
         testData.createJobMatch(jobA, 70);
         testData.createJobMatch(jobB, 71);
         a.postJson("/api/settings/integrations/tokens", "{}");
+        a.postJson("/api/settings/excluded-companies", "{\"name\":\"Excluded Co\"}");
         int othersBefore = othersRowCount();
 
         testData.update("DELETE FROM users WHERE id = ?", userA);
 
-        for (String table : new String[] {"jobs", "companies", "applications", "job_matches", "cvs", "settings", "integration_tokens"}) {
+        for (String table : new String[] {"jobs", "companies", "applications", "job_matches", "cvs", "settings", "integration_tokens",
+                "excluded_companies"}) {
             assertThat(testData.count("SELECT count(*) FROM " + table + " WHERE user_id = ?", userA)).as(table).isZero();
         }
         assertThat(testData.count("SELECT count(*) FROM application_stages s JOIN applications a ON a.id = s.application_id "

@@ -32,7 +32,8 @@ class DatabaseSchemaIntegrationTest extends IntegrationTestBase {
         assertThat(flyway(url).migrate().success).isTrue();
 
         assertThat(query(url, "SELECT version || ' ' || description || ' ' || success FROM flyway_schema_history ORDER BY installed_rank"))
-                .containsExactly("1 initial schema true", "2 add stage scheduled end at true", "3 multiple integration tokens true");
+                .containsExactly("1 initial schema true", "2 add stage scheduled end at true", "3 multiple integration tokens true",
+                        "4 excluded companies true");
         assertThat(schema(url)).isEqualTo(schema(POSTGRES.getJdbcUrl()));
         assertThat(String.join("\n", schema(url))).contains("jobs.user_id bigint NO", "uq_jobs_user_company_title",
                 "FOREIGN KEY (job_id, user_id) REFERENCES jobs(id, user_id) ON DELETE CASCADE",
@@ -122,6 +123,39 @@ class DatabaseSchemaIntegrationTest extends IntegrationTestBase {
     }
 
     @Test
+    void theExcludedCompaniesMigrationIsAdditiveAndEnforcesOneCaseInsensitiveNamePerUser() throws Exception {
+        String url = createDatabase("schema_excluded");
+        assertThat(flyway(url, "3").migrate().success).isTrue();
+        exec(url,
+                "INSERT INTO users (email, password_hash, full_name) VALUES ('alice@example.com', 'x', 'Alice')",
+                "INSERT INTO users (email, password_hash, full_name) VALUES ('bob@example.com', 'x', 'Bob')",
+                "INSERT INTO companies (user_id, name, name_key) SELECT id, 'Flix', 'flix' FROM users WHERE email = 'alice@example.com'",
+                "INSERT INTO jobs (user_id, company_id, title, company_key, title_key) "
+                        + "SELECT c.user_id, c.id, 'Backend Engineer', 'flix', 'backend engineer' FROM companies c",
+                "INSERT INTO applications (job_id, user_id, status_code) SELECT j.id, j.user_id, 'REJECTED' FROM jobs j");
+        String board = "SELECT j.id || '|' || j.title || '|' || c.name || '|' || a.status_code || '|' || j.updated_at || '|' || a.updated_at "
+                + "FROM jobs j JOIN companies c ON c.id = j.company_id JOIN applications a ON a.job_id = j.id ORDER BY j.id";
+        List<String> boardBefore = query(url, board);
+
+        assertThat(flyway(url).migrate().success).isTrue();
+
+        // Nothing is pre-filled, not even from rejected jobs, and the Board is untouched.
+        assertThat(query(url, "SELECT count(*) FROM excluded_companies")).containsExactly("0");
+        assertThat(query(url, board)).isEqualTo(boardBefore).hasSize(1);
+        exec(url, "INSERT INTO excluded_companies (user_id, name) SELECT id, 'Flix' FROM users WHERE email = 'alice@example.com'",
+                "INSERT INTO excluded_companies (user_id, name) SELECT id, 'FLIX' FROM users WHERE email = 'bob@example.com'");
+        assertThatThrownBy(() -> exec(url,
+                "INSERT INTO excluded_companies (user_id, name) SELECT id, 'flix' FROM users WHERE email = 'alice@example.com'"))
+                .hasMessageContaining("uq_excluded_companies_user_name_ignore_case");
+        assertThatThrownBy(() -> exec(url,
+                "INSERT INTO excluded_companies (user_id, name) SELECT id, ' PPRO' FROM users WHERE email = 'alice@example.com'"))
+                .hasMessageContaining("ck_excluded_companies_name_trimmed");
+        // Removing an excluded company leaves the job at that company alone.
+        exec(url, "DELETE FROM excluded_companies");
+        assertThat(query(url, board)).isEqualTo(boardBefore);
+    }
+
+    @Test
     void aFullDatabaseBackupAndRestoreKeepsEveryTokenWithItsOwner() throws Exception {
         String source = "backup_source_" + System.nanoTime();
         String target = "backup_target_" + System.nanoTime();
@@ -164,7 +198,8 @@ class DatabaseSchemaIntegrationTest extends IntegrationTestBase {
     @Test
     void everyTableWithAnOwnerRequiresOneAndIsDeletedWithIt() throws Exception {
         String url = POSTGRES.getJdbcUrl();
-        List<String> ownedTables = List.of("applications", "companies", "cvs", "integration_tokens", "job_matches", "jobs", "settings");
+        List<String> ownedTables = List.of("applications", "companies", "cvs", "excluded_companies", "integration_tokens", "job_matches", "jobs",
+                "settings");
 
         assertThat(query(url, """
                 SELECT table_name || ' ' || is_nullable FROM information_schema.columns
