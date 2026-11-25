@@ -14,7 +14,7 @@ import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
- * Settings → Job Discovery → Excluded Companies, for the normal logged-in
+ * Settings → Job Search → Excluded Companies, for the normal logged-in
  * browser session (session + CSRF) only; a bearer token cannot reach it, so
  * the list can only be edited in the application UI. MCP clients read it via
  * {@code GET /api/integrations/excluded-companies}.

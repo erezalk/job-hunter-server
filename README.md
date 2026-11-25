@@ -16,7 +16,7 @@ This repository is the **backend**. The project consists of three repositories, 
 |---|---|
 | `job-hunter-server` (this one) | Java / Spring Boot REST API, PostgreSQL schema, AI provider integration |
 | `job-hunter-web` | React / TypeScript single-page UI |
-| `job-hunter-mcp` | Local stdio MCP server for Claude Desktop (`add_job` and read-only `get_companies` and `get_excluded_companies` tools) |
+| `job-hunter-mcp` | Local stdio MCP server for Claude Desktop and Codex (`add_job` and read-only `get_companies`, `get_excluded_companies`, `get_cv` and `get_search_prompt` tools) |
 
 ```
 Docker (docker compose up --build)
@@ -221,13 +221,13 @@ Settings → Data. **Export job data** downloads `job-hunter-export-YYYY-MM-DD.j
 
 ## Claude Desktop (MCP)
 
-In Settings → Claude / MCP, generate a personal integration token per client (shown once; only its hash is stored). A user can have any number of active tokens, each with an optional, editable name (e.g. "Claude Desktop", "Codex"); each can be renamed, regenerated (new secret, same id and name, the old secret stops working at once) or revoked on its own, without affecting the others. Tokens do not expire. Build the `job-hunter-mcp` extension (with Docker, see the Quick Start above, or `npm run pack` for contributors), install it in Claude Desktop and enter the backend URL (`http://localhost:8080`, also with the Docker stack) and the token. Claude can then call `add_job`, `get_companies` (read-only: the companies already on the token owner's board, each with the titles of its positions, so Claude avoids duplicate jobs) and `get_excluded_companies` (read-only: the companies listed in Settings → Job Discovery → Excluded Companies, which Claude skips entirely during job searches; the list never affects the Board and never blocks adding a job, and it can only be edited in the UI); jobs land in New on the token owner's Board, with source "External AI". If Claude passes its own fit evaluation, it is stored as an "External AI" match without calling Gemini/Claude through Job Hunter and without applying the Low Match rule; **Re-evaluate** later replaces it with the configured provider's result. Details: `job-hunter-mcp/README.md`.
+In Settings → Claude / MCP, generate a personal integration token per client (shown once; only its hash is stored). A user can have any number of active tokens, each with an optional, editable name (e.g. "Claude Desktop", "Codex"); each can be renamed, regenerated (new secret, same id and name, the old secret stops working at once) or revoked on its own, without affecting the others. Tokens do not expire. Build the `job-hunter-mcp` extension (with Docker, see the Quick Start above, or `npm run pack` for contributors), install it in Claude Desktop and enter the backend URL (`http://localhost:8080`, also with the Docker stack) and the token. Claude can then call `add_job`, `get_companies` (read-only: the companies already on the token owner's board, each with the titles of its positions, so Claude avoids duplicate jobs) and `get_excluded_companies` (read-only: the companies listed in Settings → Job Search → Excluded Companies, which Claude skips entirely during job searches; the list never affects the Board and never blocks adding a job, and it can only be edited in the UI) and `get_cv` (read-only: the token owner's active CV — the one on the CV page, always the latest upload — as its file name and the complete text extracted at upload time, with the original PDF as an MCP resource) and `get_search_prompt` (read-only: the free-text job-search instructions saved in Settings → Job Search → Search Prompt, returned verbatim and always the latest version; it only retrieves them and can only be edited in the UI); jobs land in New on the token owner's Board, with source "External AI". If Claude passes its own fit evaluation, it is stored as an "External AI" match without calling Gemini/Claude through Job Hunter and without applying the Low Match rule; **Re-evaluate** later replaces it with the configured provider's result. Details: `job-hunter-mcp/README.md`.
 
 ## Security
 
 - Browser: session cookie (`HttpOnly`) plus CSRF token (`XSRF-TOKEN` cookie / `X-XSRF-TOKEN` header); CORS limited to the configured frontend origin.
 - Accounts: passwords are hashed with BCrypt and never returned or logged. Policy: at least 8 characters, at most 72 bytes (BCrypt's limit), no composition rules. Emails are unique ignoring case. Changing the password ends the user's other sessions. Login, sign-up and password changes are rate limited (in memory, per instance — see PROJECT_STATUS.md).
-- MCP: a separate stateless filter chain for `/api/integrations/**` only, accepting a bearer token whose only permissions are adding a job and reading the owner's company names; tokens are random 256-bit values stored as SHA-256 digests.
+- MCP: a separate stateless filter chain for `/api/integrations/**` only, accepting a bearer token whose only permissions are adding a job and reading the owner's company names, excluded companies, active CV and search prompt (never another user's: there is no user or CV parameter); tokens are random 256-bit values stored as SHA-256 digests.
 - Ownership: every job, company, Board ticket, stage, status-history entry, AI match, CV, setting and token belongs to exactly one user and is always resolved for the logged-in user (or the token's user); another user's ids answer 404, exactly like missing ones. Two users adding the same company + title get independent records. The database enforces it too (owner columns and composite foreign keys).
 - Errors use one JSON format, keep correct 4xx statuses and never include stack traces, SQL or provider responses.
 - CV files are stored under server-generated names and only the caller's active CV is ever served.
@@ -247,9 +247,10 @@ All endpoints except `POST /api/auth/login`, `POST /api/auth/register` and `GET 
 | AI match | `GET /api/jobs/{jobId}/match`, `POST /api/jobs/{jobId}/match/evaluate?force=` |
 | Settings | `GET`/`PUT /api/settings`, `PUT`/`DELETE /api/settings/ai/api-key`, `DELETE /api/settings/ai`, `POST /api/settings/ai/test-connection` |
 | Excluded companies | `GET`/`POST /api/settings/excluded-companies`, `PATCH`/`DELETE .../excluded-companies/{id}` (names trimmed, unique per user ignoring case; 409 on a duplicate) |
+| Search prompt | `GET`/`PUT`/`DELETE /api/settings/search-prompt` (`{"prompt"}` stored verbatim, at most 100,000 characters; an empty or whitespace-only prompt clears it; `GET` answers `{"prompt":"","updatedAt":null}` when none is saved) |
 | Integration tokens | `GET`/`POST /api/settings/integrations/tokens`, `PATCH`/`DELETE .../tokens/{id}`, `POST .../tokens/{id}/regenerate` |
 | Job data | `GET /api/job-data/export`, `POST /api/job-data/import` |
-| Integration | `POST /api/integrations/jobs`, `GET /api/integrations/companies`, `GET /api/integrations/excluded-companies` (bearer token) |
+| Integration | `POST /api/integrations/jobs`, `GET /api/integrations/companies`, `GET /api/integrations/excluded-companies`, `GET /api/integrations/cv` (metadata + extracted text; 404 `CV_NOT_FOUND` without a CV), `GET /api/integrations/cv/file` (original PDF bytes), `GET /api/integrations/search-prompt` (verbatim prompt; 404 `SEARCH_PROMPT_NOT_FOUND` without one) (bearer token) |
 
 ## Tests
 

@@ -33,7 +33,7 @@ class DatabaseSchemaIntegrationTest extends IntegrationTestBase {
 
         assertThat(query(url, "SELECT version || ' ' || description || ' ' || success FROM flyway_schema_history ORDER BY installed_rank"))
                 .containsExactly("1 initial schema true", "2 add stage scheduled end at true", "3 multiple integration tokens true",
-                        "4 excluded companies true");
+                        "4 excluded companies true", "5 search prompts true");
         assertThat(schema(url)).isEqualTo(schema(POSTGRES.getJdbcUrl()));
         assertThat(String.join("\n", schema(url))).contains("jobs.user_id bigint NO", "uq_jobs_user_company_title",
                 "FOREIGN KEY (job_id, user_id) REFERENCES jobs(id, user_id) ON DELETE CASCADE",
@@ -199,7 +199,7 @@ class DatabaseSchemaIntegrationTest extends IntegrationTestBase {
     void everyTableWithAnOwnerRequiresOneAndIsDeletedWithIt() throws Exception {
         String url = POSTGRES.getJdbcUrl();
         List<String> ownedTables = List.of("applications", "companies", "cvs", "excluded_companies", "integration_tokens", "job_matches", "jobs",
-                "settings");
+                "search_prompts", "settings");
 
         assertThat(query(url, """
                 SELECT table_name || ' ' || is_nullable FROM information_schema.columns

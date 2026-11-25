@@ -21,7 +21,7 @@ import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.dao.DataIntegrityViolationException;
 
 /**
- * Settings → Job Discovery → Excluded Companies (session API) and its read-only
+ * Settings → Job Search → Excluded Companies (session API) and its read-only
  * bearer-token view for MCP clients. Every test uses freshly created users so
  * exact lists can be asserted on the shared Testcontainers database.
  */

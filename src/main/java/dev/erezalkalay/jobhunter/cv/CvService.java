@@ -2,10 +2,10 @@ package dev.erezalkalay.jobhunter.cv;
 
 import dev.erezalkalay.jobhunter.auth.CurrentUserProvider;
 import dev.erezalkalay.jobhunter.common.exception.InvalidRequestException;
-import dev.erezalkalay.jobhunter.common.exception.ResourceNotFoundException;
 import dev.erezalkalay.jobhunter.user.User;
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.time.Instant;
 import java.util.Locale;
 import java.util.Optional;
 import org.springframework.beans.factory.annotation.Value;
@@ -55,10 +55,46 @@ public class CvService {
      * surface to defend.
      */
     public CvFile getActiveCvFileForCurrentUser() {
-        Cv cv = getActiveCvForCurrentUser().orElseThrow(() -> new ResourceNotFoundException("No active CV"));
+        Cv cv = getActiveCvForCurrentUser().orElseThrow(NoActiveCvException::new);
         byte[] content = storageService.readFile(cv.getStoragePath());
-        String fileName = StringUtils.hasText(cv.getFileName()) ? cv.getFileName() : "cv.pdf";
-        return new CvFile(content, fileName);
+        return new CvFile(content, fileNameOf(cv));
+    }
+
+    /** The active CV's metadata and extracted text, as an LLM client needs it. */
+    public record CvText(
+            String fileName,
+            String contentType,
+            Long fileSizeBytes,
+            Instant uploadedAt,
+            String extractionStatus,
+            String extractionWarning,
+            String extractedText) {
+    }
+
+    /**
+     * The current user's active CV with the text {@link CvTextExtractor}
+     * extracted when it was uploaded (stored on the row, so nothing is parsed
+     * again here). Only a row without stored text (never written by
+     * {@link #upload}) is extracted on the fly from the stored file, without
+     * persisting the result.
+     */
+    public CvText getActiveCvTextForCurrentUser() {
+        Cv cv = getActiveCvForCurrentUser().orElseThrow(NoActiveCvException::new);
+        String text = cv.getExtractedText();
+        String status = cv.getExtractionStatus();
+        String warning = cv.getExtractionWarning();
+        if (text == null) {
+            CvTextExtractor.ExtractionResult extraction = textExtractor.extract(storageService.readFile(cv.getStoragePath()));
+            text = extraction.text();
+            status = extraction.status();
+            warning = extraction.warning();
+        }
+        String contentType = StringUtils.hasText(cv.getContentType()) ? cv.getContentType() : CvTextExtractor.CONTENT_TYPE_PDF;
+        return new CvText(fileNameOf(cv), contentType, cv.getFileSizeBytes(), cv.getCreatedAt(), status, warning, text);
+    }
+
+    private static String fileNameOf(Cv cv) {
+        return StringUtils.hasText(cv.getFileName()) ? cv.getFileName() : "cv.pdf";
     }
 
     @Transactional
