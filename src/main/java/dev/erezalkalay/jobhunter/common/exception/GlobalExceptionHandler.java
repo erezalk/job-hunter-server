@@ -4,6 +4,8 @@ import dev.erezalkalay.jobhunter.auth.EmailAlreadyRegisteredException;
 import dev.erezalkalay.jobhunter.auth.ratelimit.RateLimitExceededException;
 import dev.erezalkalay.jobhunter.common.crypto.EncryptionNotConfiguredException;
 import dev.erezalkalay.jobhunter.common.crypto.StoredSecretUnreadableException;
+import dev.erezalkalay.jobhunter.cv.NoActiveCvException;
+import dev.erezalkalay.jobhunter.searchprompt.NoSearchPromptException;
 import dev.erezalkalay.jobhunter.excludedcompany.DuplicateExcludedCompanyException;
 import dev.erezalkalay.jobhunter.jobdata.ImportConflictException;
 import dev.erezalkalay.jobhunter.jobdata.ImportTooLargeException;
@@ -53,6 +55,19 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
     public ResponseEntity<ApiError> handleNotFound(ResourceNotFoundException ex, HttpServletRequest request) {
         return ResponseEntity.status(HttpStatus.NOT_FOUND)
                 .body(ApiError.of(404, "Not Found", ex.getMessage(), request.getRequestURI()));
+    }
+
+    // Still a 404 like any missing resource; the code lets an integration client tell it from an unknown route.
+    @ExceptionHandler(NoActiveCvException.class)
+    public ResponseEntity<ApiError> handleNoActiveCv(NoActiveCvException ex, HttpServletRequest request) {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                .body(ApiError.withCode(404, "Not Found", ex.getMessage(), NoActiveCvException.CODE, request.getRequestURI(), null));
+    }
+
+    @ExceptionHandler(NoSearchPromptException.class)
+    public ResponseEntity<ApiError> handleNoSearchPrompt(NoSearchPromptException ex, HttpServletRequest request) {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(ApiError.withCode(404, "Not Found", ex.getMessage(),
+                NoSearchPromptException.CODE, request.getRequestURI(), null));
     }
 
     @ExceptionHandler(InvalidRequestException.class)
